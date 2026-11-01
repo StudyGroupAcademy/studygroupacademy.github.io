@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#f8f7f3" />
+    <title>Dashboard | StudyGroup</title>
+    <link rel="icon" type="image/png" href="../assets/favicon.png" />
+    <link rel="apple-touch-icon" href="../assets/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <script type="module" src="../dashboard.js"></script>
+  </head>
+  <body class="checking">
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="StudyGroup dashboard"><img src="../assets/wordmark.png" alt="StudyGroup" /></a>
+      <nav class="site-nav" aria-label="Main navigation">
+        <a href="#workspace">My workspace</a>
+        <a href="#resources">Free resources</a>
+      </nav>
+      <div class="header-actions">
+        <div class="signed-in-menu" id="signed-in-menu">
+          <button class="user-chip" id="account-toggle" type="button" aria-expanded="false"><span class="user-chip-avatar" id="header-initial">S</span><span id="header-name">Student</span><span class="chevron">⌄</span></button>
+          <div class="account-popover" id="account-popover" hidden>
+            <div class="account-email" id="account-email"></div>
+            <button type="button" data-open-settings>Edit your profile</button>
+            <button type="button" id="download-data">Download my data</button>
+            <button type="button" id="sign-out">Log out</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="workspace" id="workspace">
+        <div class="workspace-inner">
+          <div class="workspace-head">
+            <div><span class="eyebrow"><span></span> YOUR WORKSPACE</span><h2>Hello, <span id="workspace-name">study buddy</span>.</h2><p>Plan it, focus on it, test yourself on it. Everything here is private to you unless you share a group code.</p></div>
+            <div class="stat-row">
+              <div class="stat"><strong id="stat-today">0</strong><small>minutes today</small></div>
+              <div class="stat"><strong id="stat-week">0</strong><small>minutes this week</small></div>
+              <div class="stat"><strong id="stat-streak">0</strong><small>day streak</small></div>
+              <div class="stat"><strong id="stat-open">0</strong><small>tasks open</small></div>
+            </div>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Workspace tools">
+            <button class="tab is-active" type="button" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+            <button class="tab" type="button" role="tab" data-tab="planner" aria-selected="false">Planner</button>
+            <button class="tab" type="button" role="tab" data-tab="timer" aria-selected="false">Focus timer</button>
+            <button class="tab" type="button" role="tab" data-tab="cards" aria-selected="false">Flashcards</button>
+            <button class="tab" type="button" role="tab" data-tab="notes" aria-selected="false">Notes</button>
+            <button class="tab" type="button" role="tab" data-tab="grades" aria-selected="false">Grades</button>
+            <button class="tab" type="button" role="tab" data-tab="exams" aria-selected="false">Exams</button>
+            <button class="tab" type="button" role="tab" data-tab="groups" aria-selected="false">Groups</button>
+            <button class="tab" type="button" role="tab" data-tab="leaderboard" aria-selected="false">Leaderboard</button>
+            <button class="tab" type="button" role="tab" data-tab="badges" aria-selected="false">Badges</button>
+          </div>
+
+          <div class="panel" data-panel="overview">
+            <div class="overview-grid">
+              <div class="card goal-card">
+                <h3>Today's goal</h3>
+                <div class="goal-bar"><i id="goal-fill"></i></div>
+                <p class="goal-text" id="goal-text">0 of 60 minutes today.</p>
+                <form class="goal-form" id="goal-form"><label>Daily goal in minutes<input name="goal" type="number" min="10" max="600" step="5" value="60" /></label><button class="button button-light" type="submit">Save goal</button></form>
+              </div>
+              <div class="card"><h3>Next exam</h3><div id="overview-exam"></div></div>
+              <div class="card"><h3>Due soon</h3><div id="overview-tasks"></div></div>
+              <div class="card"><h3>Badges</h3><div id="overview-badges"></div></div>
+              <div class="card quote-card"><span>✳</span><p id="quote-text"></p></div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="planner" hidden>
+            <form class="inline-form" id="task-form">
+              <input name="title" type="text" maxlength="120" placeholder="What do you need to get done?" aria-label="Task" required />
+              <select name="subject" data-subjects aria-label="Subject"></select>
+              <input name="due" type="date" aria-label="Due date" />
+              <button class="button button-dark" type="submit">Add task</button>
+            </form>
+            <div class="filter-row">
+              <button class="chip is-active" type="button" data-task-filter="all">All</button>
+              <button class="chip" type="button" data-task-filter="active">To do</button>
+              <button class="chip" type="button" data-task-filter="done">Done</button>
+              <button class="chip chip-quiet" type="button" id="clear-done" hidden>Clear finished</button>
+            </div>
+            <div class="item-list" id="task-list"></div>
+          </div>
+
+          <div class="panel" data-panel="timer" hidden>
+            <div class="timer-layout">
+              <div class="timer-card">
+                <div class="timer-ring" id="timer-ring" data-mode="focus"><div class="timer-face"><span id="timer-label">Focus</span><strong id="timer-display">25:00</strong></div></div>
+                <div class="timer-controls">
+                  <button class="button button-dark button-large" type="button" id="timer-toggle">Start</button>
+                  <button class="button button-light button-large" type="button" id="timer-reset">Reset</button>
+                  <button class="button button-light button-large" type="button" id="timer-log">Log and stop</button>
+                </div>
+                <div class="timer-settings">
+                  <label>Focus minutes<input id="focus-minutes" type="number" min="5" max="120" value="25" /></label>
+                  <label>Break minutes<input id="break-minutes" type="number" min="1" max="30" value="5" /></label>
+                  <label>Subject<select id="timer-subject" data-subjects></select></label>
+                </div>
+              </div>
+              <div class="timer-side">
+                <h3>Last 7 days</h3>
+                <div class="week-bars" id="week-bars"></div>
+                <h3>Recent sessions</h3>
+                <div class="item-list" id="session-list"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="cards" hidden>
+            <div class="two-col">
+              <form class="stack-form" id="deck-form">
+                <h3>New flashcard deck</h3>
+                <label>Deck name<input name="name" type="text" maxlength="40" placeholder="e.g. Cell biology" required /></label>
+                <label>Subject<select name="subject" data-subjects></select></label>
+                <label>Cards<textarea name="cards" rows="7" placeholder="What is the powerhouse of the cell? | Mitochondria&#10;What does DNA stand for? | Deoxyribonucleic acid" required></textarea></label>
+                <small class="form-hint">One card per line, written as question | answer. Up to 100 cards.</small>
+                <button class="button button-dark" type="submit">Save deck</button>
+              </form>
+              <div><h3>Your decks</h3><div class="item-list" id="deck-list"></div></div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="groups" hidden>
+            <div class="group-layout">
+              <div class="group-side">
+                <form class="stack-form" id="group-form">
+                  <h3>Start a group</h3>
+                  <label>Group name<input name="name" type="text" minlength="2" maxlength="40" placeholder="e.g. Year 11 Science" required /></label>
+                  <label>Subject<select name="subject" data-subjects></select></label>
+                  <button class="button button-dark" type="submit">Create group</button>
+                </form>
+                <form class="stack-form" id="join-form">
+                  <h3>Join with a code</h3>
+                  <label>Invite code<input name="code" type="text" maxlength="6" minlength="6" placeholder="ABC123" autocapitalize="characters" autocomplete="off" required /></label>
+                  <button class="button button-light" type="submit">Join group</button>
+                </form>
+                <div><h3>Your groups</h3><div class="group-list" id="group-list"></div></div>
+              </div>
+              <div class="chat">
+                <div class="chat-empty" id="chat-empty"><span>◎</span><strong>Pick a group to open its chat</strong><p>Groups are private. Only people with the invite code can join, and only members can read messages.</p></div>
+                <div class="chat-room" id="chat-room" hidden>
+                  <div class="chat-head"><div><strong id="chat-title"></strong><small id="chat-meta"></small></div><div class="chat-actions"><button class="button button-light" type="button" id="copy-code">Copy invite code</button><button class="button button-light" type="button" id="leave-group">Leave group</button></div></div>
+                  <div class="chat-messages" id="chat-messages" aria-live="polite"></div>
+                  <form class="chat-form" id="chat-form"><input name="text" type="text" maxlength="500" placeholder="Message your group" autocomplete="off" aria-label="Message" /><button class="button button-dark" type="submit">Send</button></form>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="exams" hidden>
+            <form class="inline-form" id="exam-form">
+              <input name="name" type="text" maxlength="60" placeholder="e.g. Maths Paper 1" aria-label="Exam name" required />
+              <select name="subject" data-subjects aria-label="Subject"></select>
+              <input name="examDate" type="date" aria-label="Exam date" required />
+              <button class="button button-dark" type="submit">Add exam</button>
+            </form>
+            <div class="item-list" id="exam-list"></div>
+          </div>
+
+          <div class="panel" data-panel="notes" hidden>
+            <div class="notes-layout">
+              <div class="notes-side">
+                <div class="notes-tools"><input id="note-search" type="search" placeholder="Search notes" aria-label="Search notes" /><button class="button button-dark" id="note-new" type="button">New note</button></div>
+                <div class="group-list" id="note-list"></div>
+              </div>
+              <form class="stack-form note-editor" id="note-form">
+                <input name="title" type="text" maxlength="60" placeholder="Note title" aria-label="Note title" required />
+                <select name="subject" data-subjects aria-label="Subject"></select>
+                <textarea name="body" rows="14" maxlength="5000" placeholder="Write your notes here" aria-label="Note text"></textarea>
+                <div class="note-actions"><small id="note-status">New note</small><button class="button button-light" type="button" id="note-delete" hidden>Delete</button><button class="button button-dark" type="submit">Save note</button></div>
+              </form>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="grades" hidden>
+            <form class="inline-form score-form" id="score-form">
+              <input name="name" type="text" maxlength="60" placeholder="e.g. Paper 1 mock" aria-label="Test name" required />
+              <select name="subject" data-subjects aria-label="Subject"></select>
+              <input name="score" type="number" min="0" step="0.5" placeholder="Score" aria-label="Score" required />
+              <input name="outOf" type="number" min="1" max="1000" step="1" placeholder="Out of" aria-label="Out of" required />
+              <input name="takenOn" type="date" aria-label="Date taken" required />
+              <button class="button button-dark" type="submit">Log result</button>
+            </form>
+            <div class="two-col">
+              <div><h3>By subject</h3><div class="item-list" id="score-summary"></div></div>
+              <div><h3>All results</h3><div class="item-list" id="score-list"></div></div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="leaderboard" hidden>
+            <div class="leaderboard-tab">
+              <div class="leaderboard-card">
+                <div class="leaderboard-header"><div><span class="leaderboard-label"><i></i> OUR STUDY COMMUNITY</span><h3>A little goes a long way</h3></div><button class="refresh-button" id="refresh-leaderboard" type="button" aria-label="Refresh leaderboard" title="Refresh">↻</button></div>
+                <p class="leaderboard-subtitle" id="leaderboard-subtitle">A daily check-in leaderboard. Kindness over competition.</p>
+                <div class="filter-row board-switch"><button class="chip is-active" type="button" data-board="checkins">Daily check-ins</button><button class="chip" type="button" data-board="focus">Focus this week</button></div>
+                <div id="leaderboard-list" class="leaderboard-list" data-size="10" aria-live="polite"><div class="leaderboard-loading"><span class="loading-spinner"></span> Finding our study buddies…</div></div>
+                <p class="my-rank" id="my-rank"></p>
+                <div class="leaderboard-footer"><span id="leaderboard-footnote">One check-in per 24 hours</span><span>Nickname only <b>✳</b></span></div>
+                <div class="member-checkin" id="member-checkin" hidden><span><strong>Good to see you, <span id="checkin-name">study buddy</span>.</strong><small>One point for showing up today. That's all it takes.</small></span><button type="button" id="daily-checkin">Check in for today +1</button></div>
+                <div class="member-join" id="member-join" hidden><span>Choose if you'd like to join in.</span><button type="button">Set leaderboard preferences</button></div>
+              </div>
+              <div class="card how-card">
+                <h3>How it works</h3>
+                <p>Opt in from your profile and your nickname joins the board. Nobody sees your email or real name.</p>
+                <p><strong>Daily check-ins</strong> give one point for showing up each day.</p>
+                <p><strong>Focus this week</strong> adds up the minutes from your focus timer and resets every Monday.</p>
+                <p class="privacy-note" id="privacy-note"><span>♧</span> Only your chosen nickname appears on the public board.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="badges" hidden>
+            <p class="badge-summary" id="badge-summary"></p>
+            <div class="badge-grid" id="badge-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="resources-section" id="resources">
+        <div class="resources-heading"><div><span class="eyebrow"><span></span> A FEW GOOD PLACES TO START</span><h2>Free resources.<br /><span>Picked with purpose.</span></h2></div><p>We point you towards established revision sites. We'll keep learning from students about what's genuinely useful, and build from there.</p></div>
+        <div class="resource-tools"><div class="filter-row"><button class="chip is-active" type="button" data-resource-filter="all">All</button><button class="chip" type="button" data-resource-filter="maths">Maths</button><button class="chip" type="button" data-resource-filter="science">Science</button><button class="chip" type="button" data-resource-filter="english">English</button><button class="chip" type="button" data-resource-filter="humanities">Humanities</button><button class="chip" type="button" data-resource-filter="languages">Languages</button></div><input class="resource-search" id="resource-search" type="search" placeholder="Search resources" aria-label="Search resources" /></div>
+        <div class="resource-picks" id="resource-picks">
+          <a class="resource-pick pick-maths" data-subjects="maths" href="https://www.mathsgenie.co.uk/gcse.html" target="_blank" rel="noopener noreferrer"><span class="pick-topline"><span>M</span> MATHEMATICS</span><strong>Maths Genie</strong><p>Topic notes, questions and past papers to practise at your pace.</p><span class="pick-bottom">Browse GCSE maths <b>↗</b></span><span class="pick-decoration">∑</span></a>
+          <a class="resource-pick pick-science" data-subjects="maths science" href="https://www.physicsandmathstutor.com/" target="_blank" rel="noopener noreferrer"><span class="pick-topline"><span>P</span> SCIENCE & MORE</span><strong>Physics & Maths Tutor</strong><p>Notes, questions and revision materials across GCSE subjects.</p><span class="pick-bottom">Explore free resources <b>↗</b></span><span class="pick-decoration">⚛</span></a>
+          <a class="resource-pick pick-bitesize" data-subjects="maths science english humanities languages" href="https://www.bbc.co.uk/bitesize/levels/z98jmp3" target="_blank" rel="noopener noreferrer"><span class="pick-topline"><span>B</span> ALL-ROUND REVISION</span><strong>BBC Bitesize</strong><p>Friendly explainers, revision guides and videos for GCSE learning.</p><span class="pick-bottom">Explore GCSE Bitesize <b>↗</b></span><span class="pick-decoration">▶</span></a>
+          <a class="resource-pick pick-maths" data-subjects="maths" href="https://corbettmaths.com/" target="_blank" rel="noopener noreferrer"><span class="pick-topline"><span>C</span> MATHEMATICS</span><strong>Corbettmaths</strong><p>Short videos, worksheets and practice questions for every maths topic.</p><span class="pick-bottom">Browse Corbettmaths <b>↗</b></span><span class="pick-decoration">÷</span></a>
+          <a class="resource-pick pick-science" data-subjects="maths science english humanities languages" href="https://www.thenational.academy/" target="_blank" rel="noopener noreferrer"><span class="pick-topline"><span>O</span> FREE LESSONS</span><strong>Oak National Academy</strong><p>Free classroom lessons with videos, quizzes and worksheets.</p><span class="pick-bottom">Explore Oak lessons <b>↗</b></span><span class="pick-decoration">✿</span></a>
+          <a class="resource-pick pick-bitesize" data-subjects="science humanities" href="https://cognitoedu.org/" target="_blank" rel="noopener noreferrer"><span class="pick-topline"><span>C</span> VIDEO LESSONS</span><strong>Cognito</strong><p>Clear video lessons and quizzes for science, maths and humanities.</p><span class="pick-bottom">Watch Cognito lessons <b>↗</b></span><span class="pick-decoration">◎</span></a>
+          <a class="resource-pick pick-maths" data-subjects="maths science english humanities languages" href="https://senecalearning.com/" target="_blank" rel="noopener noreferrer"><span class="pick-topline"><span>S</span> PRACTICE & RECALL</span><strong>Seneca Learning</strong><p>Courses and quizzes that help new facts stick. Has a free tier.</p><span class="pick-bottom">Try Seneca <b>↗</b></span><span class="pick-decoration">✳</span></a>
+        </div>
+        <p class="resource-empty" id="resource-empty" hidden>No resources match that yet. Try another subject or clear the search.</p>
+        <p class="resource-disclaimer">These are independent third-party resources. StudyGroup is not affiliated with or endorsed by their providers. Always check that material matches your exam board.</p>
+      </section>
+
+    </main>
+
+        <footer class="site-footer"><a class="brand footer-brand" href="./"><img src="../assets/wordmark.png" alt="StudyGroup" /></a><span>Built for curious minds, one student at a time.</span><span>Your nickname stays yours <b>✳</b></span></footer>
+
+    <dialog class="app-dialog" id="profile-dialog" aria-labelledby="profile-title">
+      <form class="dialog-form" id="profile-form">
+        <button class="dialog-close" type="button" data-close-dialog aria-label="Close dialog">×</button>
+        <div class="dialog-mark"><img src="../assets/favicon.png" alt="" /></div>
+        <span class="eyebrow"><span></span> YOUR ACCOUNT, YOUR CALL</span>
+        <h2 id="profile-title">Make yourself at home.</h2><p class="dialog-intro" id="profile-intro">Choose the nickname students see. Your email stays private.</p>
+        <div class="auth-error" id="profile-error" role="alert" hidden></div>
+        <label>Your study nickname<input name="nickname" type="text" minlength="2" maxlength="24" autocomplete="nickname" pattern="[A-Za-z0-9 _.-]{2,24}" required /></label>
+        <label class="opt-in-field"><input name="leaderboardOptIn" type="checkbox" /><span><strong>Show my nickname on the leaderboard</strong><small>One friendly daily check-in. Opt out whenever you like.</small></span></label>
+        <button class="button button-dark dialog-submit" type="submit">Save my preferences <span>→</span></button>
+      </form>
+    </dialog>
+
+    <dialog class="app-dialog study-dialog" id="study-dialog" aria-labelledby="study-title">
+      <div class="dialog-form">
+        <button class="dialog-close" type="button" data-close-dialog aria-label="Close dialog">×</button>
+        <span class="eyebrow"><span></span> FLASHCARDS</span>
+        <h2 id="study-title">Deck</h2>
+        <div id="study-body">
+          <div class="study-meta"><span id="study-progress">Card 1 of 1</span><label class="study-shuffle"><input id="study-shuffle" type="checkbox" checked /> Shuffle</label></div>
+          <button class="study-card" id="study-card" type="button"><small id="study-face-label">Question</small><span id="study-face-text"></span></button>
+          <div class="study-actions">
+            <button class="button button-dark button-large" type="button" id="study-flip">Show answer</button>
+            <div class="study-grade" id="study-grade" hidden><button class="button button-light button-large" type="button" id="study-again">Still learning</button><button class="button button-dark button-large" type="button" id="study-good">Got it</button></div>
+          </div>
+          <small class="form-hint">Tip: tap the card to flip it. Arrow keys also work.</small>
+        </div>
+        <div class="study-summary" id="study-summary" hidden>
+          <strong>Deck complete</strong>
+          <p id="study-summary-text"></p>
+          <button class="button button-dark button-large" type="button" id="study-restart">Study again</button>
+        </div>
+      </div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="firebase-banner" id="firebase-banner" role="status">Connecting to Firebase…</div>
+  </body>
+</html>
