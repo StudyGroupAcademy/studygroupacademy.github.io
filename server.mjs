@@ -68,7 +68,8 @@ const xpActivityIds = new Set([
 ]);
 
 function assertPath(path, kind = "document") {
-  if (!Array.isArray(path) || path.length < 2 || path.length > 5
+  const minimumLength = kind === "collection" ? 1 : 2;
+  if (!Array.isArray(path) || path.length < minimumLength || path.length > 5
     || path.some((part) => typeof part !== "string" || !/^[A-Za-z0-9_-]{1,140}$/.test(part))
     || (kind === "document" && path.length % 2 !== 0)
     || (kind === "collection" && path.length % 2 !== 1)) {
@@ -172,9 +173,12 @@ async function authorizeMutation(client, uid, change, existing) {
   throw new Error("You don't have permission to change this data.");
 }
 
-async function applyMutation(client, uid, change) {
+async function applyMutation(client, uid, change, trustedActivity = false) {
   const path = assertPath(change.path);
   const existing = await record(client, path);
+  if (path[0] === "users" && path[1] === uid && path[2] === "learningProgress" && !trustedActivity) {
+    throw new Error("Learning progress is saved only through a completed activity.");
+  }
   if (path[0] === "publicLeaderboard" && change.data?.xp !== undefined
     && !(change.op === "set" && !existing && Number(change.data.xp) === 0)) {
     throw new Error("XP is awarded only when you complete an activity.");
@@ -325,7 +329,7 @@ async function completeLearningActivity(uid, activityId) {
       op: "set",
       path: progressPath.split("/"),
       data: { completed: true, xp: 10, completedAt: { __studygroupTimestamp: new Date().toISOString() } }
-    });
+    }, true);
 
     const leaderboardPath = `publicLeaderboard/${uid}`;
     const leaderboard = await record(client, leaderboardPath);
@@ -347,6 +351,41 @@ async function completeLearningActivity(uid, activityId) {
   }
 }
 
+async function syncLeaderboardXp(uid) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const leaderboardPath = `publicLeaderboard/${uid}`;
+    const leaderboard = await record(client, leaderboardPath);
+    if (!leaderboard) {
+      await client.query("COMMIT");
+      return { synced: false, xp: 0 };
+    }
+    const progress = await client.query(
+      "SELECT path, data FROM app_records WHERE owner_id = $1 AND path LIKE $2",
+      [uid, `users/${uid}/learningProgress/%`]
+    );
+    const xp = progress.rows.reduce((total, row) => {
+      const activityId = row.path.split("/").at(-1);
+      return xpActivityIds.has(activityId) && row.data.completed
+        ? total + (Number(row.data.xp) || 10)
+        : total;
+    }, 0);
+    const nextData = applyFields(leaderboard.data, { xp });
+    await client.query(
+      "UPDATE app_records SET data = $2::jsonb, updated_at = now() WHERE path = $1 AND owner_id = $3",
+      [leaderboardPath, JSON.stringify(nextData), uid]
+    );
+    await client.query("COMMIT");
+    return { synced: true, xp };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function authenticatedUser(request) {
   const authorization = request.headers.authorization || "";
   const match = authorization.match(/^Bearer ([^\s]+)$/);
@@ -354,8 +393,7 @@ async function authenticatedUser(request) {
 
   try {
     const { payload } = await jwtVerify(match[1], jwks, {
-      issuer: authIssuer,
-      audience: authIssuer
+      issuer: authIssuer
     });
     return typeof payload.sub === "string" && payload.sub
       ? { id: payload.sub, email: typeof payload.email === "string" ? payload.email.toLowerCase() : "" }
@@ -923,7 +961,9 @@ const server = createServer(async (request, response) => {
     if (path === "/api/data") {
       const result = body.op === "completeActivity"
         ? await completeLearningActivity(userId, body.activityId)
-        : await dataRequest(userId, body);
+        : body.op === "syncXp"
+          ? await syncLeaderboardXp(userId)
+          : await dataRequest(userId, body);
       sendJson(response, 200, result, origin);
       return;
     }
