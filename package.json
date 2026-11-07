@@ -1,0 +1,15 @@
+{
+  "name": "studygroupacademy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node --check server.mjs",
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@neon/config": "^1.13.0",
+    "@neon/env": "^2.1.0",
+    "cloudinary": "^2.11.0",
+    "jose": "^6.2.15"
+  }
+}
