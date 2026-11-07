@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc } from "./firestore-client.js";
+import { collection, completeActivity, getDocs, limit, query } from "./firestore-client.js";
 import { $, $$, db, state } from "./core.js";
 import { courses } from "./course-catalog.js";
 
@@ -289,6 +289,7 @@ function renderLessonProgress() {
   const totalXp = Object.values(lessonProgress).reduce((sum, entry) => sum + (entry.completed ? Number(entry.xp) || 10 : 0), 0);
   const xp = $("#stat-xp");
   if (xp) xp.textContent = String(totalXp);
+  window.dispatchEvent(new CustomEvent("studygroup:xpprogress", { detail: { xp: totalXp } }));
   renderCourseCards();
 }
 
@@ -331,14 +332,12 @@ async function completeLesson(lesson, feedback) {
     return;
   }
   try {
-    const reference = doc(db, "users", lessonUser.uid, "learningProgress", lesson.id);
-    const existing = await getDoc(reference);
-    if (!existing.exists()) {
-      await setDoc(reference, { completed: true, xp: 10, completedAt: serverTimestamp() });
-    }
-    lessonProgress[lesson.id] = { completed: true, xp: 10 };
+    const result = await completeActivity(lesson.id);
+    lessonProgress[lesson.id] = { completed: true, xp: result.xp || 10 };
     renderLessonProgress();
-    feedback.textContent = `Correct! ${lesson.explanation} +10 XP earned.`;
+    feedback.textContent = result.awarded
+      ? `Correct! ${lesson.explanation} +10 XP earned.`
+      : `Correct! ${lesson.explanation} You've already earned XP for this lesson.`;
     feedback.classList.add("is-correct");
   } catch (error) {
     console.error("Could not save lesson progress.", error);

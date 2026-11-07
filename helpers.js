@@ -46,6 +46,18 @@ export function sanitizeNickname(value, fallback) {
   return validNickname(cleaned) ? cleaned : fallback;
 }
 
+export const NAME_TAG_MILESTONES = [
+  { xp: 30, tag: "Bright Spark", description: "Earn 30 XP by completing lessons and worksheets." },
+  { xp: 100, tag: "Quick Thinker", description: "Earn 100 XP across your learning activities." },
+  { xp: 250, tag: "Scholar", description: "Earn 250 XP across your learning activities." },
+  { xp: 500, tag: "Study Star", description: "Earn 500 XP across your learning activities." }
+];
+
+export function earnedNameTag(xp) {
+  const score = Math.max(0, Number(xp) || 0);
+  return NAME_TAG_MILESTONES.filter((milestone) => score >= milestone.xp).at(-1) || null;
+}
+
 export function consumeOAuthCallback() {
   const url = new URL(window.location.href);
   const error = url.searchParams.get("error");

@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch } from "./firestore-client.js";
+import { doc, getDoc, serverTimestamp, setDoc, syncLeaderboardXp, updateDoc, writeBatch } from "./firestore-client.js";
 import { db, state } from "./core.js";
 import { sanitizeNickname, weekStartKey } from "./helpers.js";
 
@@ -81,6 +81,8 @@ async function createOrLoadProfile(user) {
     if (!publicSnapshot.exists()) {
       await setDoc(publicReference, {
         displayName: existing.nickname,
+        xp: 0,
+        xp: 0,
         points: 0,
         lastPointAt: null,
         joinedAt: serverTimestamp()
@@ -110,6 +112,8 @@ export async function saveProfileChoices(profile, optIn) {
   } else if (optIn) {
     batch.set(publicReference, {
       displayName: profile.nickname,
+      xp: 0,
+      xp: 0,
       points: 0,
       lastPointAt: null,
       joinedAt: serverTimestamp()
@@ -118,6 +122,13 @@ export async function saveProfileChoices(profile, optIn) {
     batch.delete(publicReference);
   }
   await batch.commit();
+  if (optIn) {
+    try {
+      await syncLeaderboardXp();
+    } catch (error) {
+      console.error("Could not sync earned XP to the public leaderboard.", error);
+    }
+  }
   state.profile = { ...state.profile, ...profile, onboardingComplete: true, leaderboardOptIn: optIn };
 }
 

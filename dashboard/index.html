@@ -27,7 +27,7 @@
       <section class="workspace" id="workspace">
         <div class="workspace-inner">
           <div class="workspace-head">
-            <div><span class="eyebrow"><span></span> YOUR STUDY SPACE</span><h2>Hello, <span id="workspace-name">Learner</span>.</h2><p>Choose a subject, learn one useful idea, and collect small wins as you go.</p></div>
+            <div><span class="eyebrow"><span></span> YOUR STUDY SPACE</span><h2>Hello, <span id="workspace-name">Learner</span> <span class="earned-name-tag" id="workspace-name-tag" hidden></span>.</h2><p>Choose a subject, learn one useful idea, and collect small wins as you go.</p></div>
             <div class="stat-row">
               <div class="stat"><strong id="stat-today">0</strong><small>minutes today</small></div>
               <div class="stat"><strong id="stat-week">0</strong><small>minutes this week</small></div>
@@ -53,7 +53,7 @@
             <a class="tab-side-link" href="../content/"><span>▧</span> Subject library</a>
             <div class="sidebar-account">
               <div class="signed-in-menu" id="signed-in-menu">
-                <button class="user-chip" id="account-toggle" type="button" aria-expanded="false"><span class="user-chip-avatar" id="header-initial">S</span><span id="header-name">Learner</span><span class="account-chevron" aria-hidden="true"></span></button>
+                <button class="user-chip" id="account-toggle" type="button" aria-expanded="false"><span class="user-chip-avatar" id="header-initial">S</span><span class="user-chip-name"><span id="header-name">Learner</span><span class="earned-name-tag" id="header-name-tag" hidden></span></span><span class="account-chevron" aria-hidden="true"></span></button>
                 <div class="account-popover" id="account-popover" hidden>
                   <div class="account-email" id="account-email"></div>
                   <div class="account-handle" id="account-handle"></div>
@@ -281,18 +281,18 @@
             <div class="leaderboard-tab">
               <div class="leaderboard-card">
                 <div class="leaderboard-header"><div><span class="leaderboard-label"><i></i> OUR STUDY COMMUNITY</span><h3>A little goes a long way</h3></div><button class="refresh-button" id="refresh-leaderboard" type="button" aria-label="Refresh leaderboard" title="Refresh">↻</button></div>
-                <p class="leaderboard-subtitle" id="leaderboard-subtitle">A daily check-in leaderboard. Kindness over competition.</p>
-                <div class="filter-row board-switch"><button class="chip is-active" type="button" data-board="checkins">Daily check-ins</button><button class="chip" type="button" data-board="focus">Focus this week</button></div>
+                <p class="leaderboard-subtitle" id="leaderboard-subtitle">Earn XP by completing lessons and worksheets. Every learner starts with a fresh page.</p>
+                <div class="filter-row board-switch"><button class="chip is-active" type="button" data-board="xp">Total XP</button><button class="chip" type="button" data-board="focus">Focus this week</button></div>
                 <div id="leaderboard-list" class="leaderboard-list" data-size="10" aria-live="polite"><div class="leaderboard-loading"><span class="loading-spinner"></span> Finding our study buddies…</div></div>
                 <p class="my-rank" id="my-rank"></p>
-                <div class="leaderboard-footer"><span id="leaderboard-footnote">One check-in per 24 hours</span><span>Nickname only <b>✳</b></span></div>
-                <div class="member-checkin" id="member-checkin" hidden><span><strong>Good to see you, <span id="checkin-name">study buddy</span>.</strong><small>One point for showing up today. That's all it takes.</small></span><button type="button" id="daily-checkin">Check in for today +1</button></div>
-                <div class="member-join" id="member-join" hidden><span>Choose if you'd like to join in.</span><button type="button">Set leaderboard preferences</button></div>
+                <div class="leaderboard-footer"><span id="leaderboard-footnote">XP from completed activities</span><span>Opt-in · name tag included <b>✳</b></span></div>
+                <div class="member-xp" id="member-xp" hidden><span>Your earned study XP</span><strong><span id="member-xp-value">0</span> XP</strong></div>
+                <div class="member-join" id="member-join" hidden><span>Opt in to show your chosen study name and name tag.</span><button type="button">Join the XP leaderboard</button></div>
               </div>
               <div class="card how-card">
                 <h3>How it works</h3>
-                <p>Opt in from your profile and your nickname joins the board. Nobody sees your email or real name.</p>
-                <p><strong>Daily check-ins</strong> give one point for showing up each day.</p>
+                <p>Opt in from your profile and your chosen study name joins the board. Your email stays private.</p>
+                <p><strong>Lessons and worksheets</strong> award XP once when you complete them. Name tags unlock as you reach milestones.</p>
                 <p><strong>Focus this week</strong> adds up the minutes from your focus timer and resets every Monday.</p>
                 <p class="privacy-note" id="privacy-note"><span>♧</span> Only your chosen nickname appears on the public board.</p>
               </div>
@@ -331,7 +331,6 @@
         <label>Your account name<input name="displayName" type="text" minlength="2" maxlength="60" autocomplete="name" required /></label>
         <label>Your handle<input name="handle" type="text" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" placeholder="yourname_1234" required /><small class="form-hint">Shown with an @. A short account-specific suffix is added to new handles.</small></label>
         <label>A short bio<textarea name="bio" maxlength="240" rows="3" placeholder="A little about what you are learning…"></textarea></label>
-        <label>Profile badge<select name="badge"><option>Learner</option><option>STAR</option><option>Curious mind</option><option>Goal getter</option><option>Quiet achiever</option><option>Team player</option></select></label>
         <div class="profile-intro-grid"><span class="profile-step">02</span><span><strong>Set your course details</strong><small>Choose the exam boards that match your subjects.</small></span></div>
         <fieldset class="profile-boards"><legend>My exam boards</legend>
           <div class="signup-board-grid">

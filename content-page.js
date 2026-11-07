@@ -1,8 +1,9 @@
 import { courses } from "./course-catalog.js";
 import { lessonGuides } from "./lesson-guides.js";
 import { authClient } from "./auth-client.js";
-import { doc, getDoc } from "./firestore-client.js";
+import { collection, completeActivity, doc, getDoc, getDocs, limit, query } from "./firestore-client.js";
 import { db } from "./core.js";
+import { earnedNameTag } from "./helpers.js";
 
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -42,47 +43,36 @@ function renderFullLesson(lesson, guide) {
   if (!guide) {
     return `<article class="course-note-card"><h2>${escapeHtml(lesson.title)}</h2><p>${escapeHtml(lesson.summary)}</p><ul>${lesson.points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}</ul><div class="course-example"><strong>Worked example</strong><p>${escapeHtml(lesson.example)}</p></div></article>`;
   }
-  return `<div class="full-lesson" data-lesson-slug="${escapeHtml(`${courseSlug}/${topicSlug}`)}">
-    <section class="lesson-welcome">
-      <div><span class="lesson-welcome-kicker">YOUR LEARNING PATH · ${escapeHtml(guide.duration)}</span><h2>Understand it. Practise it. Make it stick.</h2><p>${escapeHtml(lesson.summary)} This lesson moves from the core idea to a worked model and independent retrieval practice.</p></div>
-      <a class="lesson-start-button" href="#lesson-ideas">Start learning <span>↓</span></a>
-    </section>
-    <div class="lesson-roadmap" aria-label="Lesson sections">
-      <a href="#lesson-goals"><span>01</span> Goals</a><a href="#lesson-ideas"><span>02</span> Build the idea</a><a href="#lesson-worked"><span>03</span> Worked model</a><a href="#lesson-practice"><span>04</span> Practice</a>
-    </div>
-    <section class="lesson-goals" id="lesson-goals">
-      <div class="lesson-section-heading"><span class="lesson-section-number">01</span><div><span class="lesson-section-label">YOUR DESTINATION</span><h2>By the end, you can…</h2></div></div>
-      <div class="lesson-goal-grid">${lesson.points.map((point, index) => `<article><span>${String(index + 1).padStart(2, "0")}</span><p>${escapeHtml(point)}</p></article>`).join("")}</div>
-    </section>
-    <section class="lesson-ideas" id="lesson-ideas">
-      <div class="lesson-section-heading"><span class="lesson-section-number">02</span><div><span class="lesson-section-label">BUILD THE IDEA</span><h2>Learn it in small steps.</h2></div></div>
-      <div class="lesson-stage-list">${guide.stages.map((stage, index) => `<article class="lesson-stage"><span class="lesson-stage-index">${String(index + 1).padStart(2, "0")}</span><div><h3>${escapeHtml(stage.title)}</h3><p>${escapeHtml(stage.text)}</p><div class="lesson-stage-example"><strong>Picture it</strong><span>${escapeHtml(stage.example)}</span></div></div></article>`).join("")}</div>
-    </section>
-    <section class="lesson-worked" id="lesson-worked">
-      <div class="lesson-section-heading"><span class="lesson-section-number">03</span><div><span class="lesson-section-label">THINK IT THROUGH</span><h2>Worked example, step by step.</h2></div></div>
-      <div class="lesson-worked-card"><div class="lesson-worked-prompt"><span>THE QUESTION</span><p>${escapeHtml(lesson.example)}</p></div><ol>${guide.worked.map((step) => `<li><span>${escapeHtml(step)}</span></li>`).join("")}</ol></div>
-      <aside class="lesson-misconception"><span>↗</span><p><strong>Watch out for this</strong>${escapeHtml(guide.misconception)}</p></aside>
-    </section>
-    <section class="lesson-practice" id="lesson-practice">
-      <div class="lesson-section-heading"><span class="lesson-section-number">04</span><div><span class="lesson-section-label">RETRIEVAL PRACTICE</span><h2>Now try it without looking.</h2><p>Have a go first, then open the answer and explanation to check your thinking.</p></div></div>
-      <div class="lesson-question-list">${guide.questions.map((question, index) => `<article class="lesson-question"><span class="lesson-question-index">CHECK ${String(index + 1).padStart(2, "0")}</span><p>${escapeHtml(question.prompt)}</p><details><summary>Reveal answer and reasoning</summary><div><strong>${escapeHtml(question.answer)}</strong><p>${escapeHtml(question.why)}</p></div></details></article>`).join("")}</div>
-    </section>
-    <section class="lesson-finish">
-      <div><span class="lesson-section-label">A SMALL WIN COUNTS</span><h2>What will you remember?</h2><p>Say the main idea in your own words, then mark the lesson complete when you feel ready.</p></div>
-      <button class="lesson-complete-button" type="button" data-complete-lesson>Mark lesson complete <span>✓</span></button>
-      <p class="lesson-complete-status" data-complete-status role="status" aria-live="polite"></p>
-    </section>
-  </div>`;
+  const slides = [
+    `<div class="lesson-slide lesson-slide-intro" data-lesson-slide><span class="lesson-slide-kicker">WELCOME · ${escapeHtml(guide.duration)}</span><h2>${escapeHtml(lesson.title)}</h2><p>${escapeHtml(lesson.summary)}</p><h3>By the end, you can…</h3><ul>${lesson.points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}</ul><p class="lesson-slide-tip">Move through one idea at a time. Your place is saved on this device, so you can quit and come back later.</p></div>`,
+    ...guide.stages.map((stage, index) => `<div class="lesson-slide" data-lesson-slide><span class="lesson-slide-kicker">BUILD THE IDEA · STEP ${index + 1} OF ${guide.stages.length}</span><h2>${escapeHtml(stage.title)}</h2><p>${escapeHtml(stage.text)}</p><div class="lesson-stage-example"><strong>PICTURE IT</strong><span>${escapeHtml(stage.example)}</span></div><label class="lesson-reflection">Make it yours <small>Write one short note or example in your own words.</small><textarea rows="3" maxlength="400" data-reflection="${index}" placeholder="Your thought…"></textarea></label></div>`),
+    `<div class="lesson-slide" data-lesson-slide><span class="lesson-slide-kicker">THINK IT THROUGH · WORKED MODEL</span><h2>Let's work through it together.</h2><div class="lesson-worked-prompt"><span>THE QUESTION</span><p>${escapeHtml(lesson.example)}</p></div><ol class="lesson-worked-steps">${guide.worked.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol><aside class="lesson-misconception"><span>↗</span><p><strong>Watch out for this</strong>${escapeHtml(guide.misconception)}</p></aside></div>`,
+    ...guide.questions.map((question, index) => `<div class="lesson-slide" data-lesson-slide><span class="lesson-slide-kicker">YOUR TURN · CHECK ${index + 1} OF ${guide.questions.length}</span><h2>Try it before you reveal.</h2><p class="lesson-slide-question">${escapeHtml(question.prompt)}</p><form class="lesson-self-check"><label>Your attempt<textarea rows="3" maxlength="500" required placeholder="Write your answer or working…"></textarea></label><button class="lesson-check-button" type="submit">Compare with the answer</button><div class="lesson-answer-reveal" hidden><strong>Suggested answer: ${escapeHtml(question.answer)}</strong><p>${escapeHtml(question.why)}</p><span>Take a moment to compare this with your attempt. You can continue when you're ready.</span></div></form></div>`),
+    `<div class="lesson-slide lesson-slide-finish" data-lesson-slide><span class="lesson-slide-kicker">LESSON COMPLETE</span><h2>That's a real step forward.</h2><p>Say the main idea in your own words. When you're ready, save your progress and collect your XP.</p><div class="lesson-finish-reminder"><strong>${escapeHtml(lesson.title)}</strong><span>${escapeHtml(lesson.summary)}</span></div><button class="lesson-complete-button" type="button" data-complete-lesson>Complete lesson · earn 10 XP <span>✓</span></button><p class="lesson-complete-status" data-complete-status role="status" aria-live="polite"></p></div>`
+  ];
+  return `<section class="lesson-player" data-lesson-slug="${escapeHtml(`${courseSlug}/${topicSlug}`)}" data-activity-id="${escapeHtml(`full-${courseSlug}-${topicSlug}`)}">
+    <header class="lesson-player-header"><div><span class="lesson-player-course">${escapeHtml(course.title)} · GUIDED LESSON</span><h2>${escapeHtml(lesson.title)}</h2></div><a class="lesson-quit-button" href="/content/${course.slug}/notes/">Quit lesson <span aria-hidden="true">×</span></a></header>
+    <div class="lesson-player-progress"><span data-slide-label>Getting ready…</span><progress max="${slides.length}" value="1" data-slide-progress></progress></div>
+    <div class="lesson-slide-viewport">${slides.join("")}</div>
+    <footer class="lesson-player-controls"><button class="lesson-nav-button" type="button" data-slide-prev>← Back</button><span data-slide-count></span><button class="lesson-nav-button lesson-nav-next" type="button" data-slide-next>Continue →</button></footer>
+  </section>`;
 }
 
 function renderWorksheets() {
-  return `<div class="course-material-list">${course.worksheets.map((sheet) => `<article class="course-note-card course-worksheet">
-    <div class="course-note-kicker">STUDYGROUP PRACTICE</div><h3>${escapeHtml(sheet.title)}</h3>
-    <ol class="worksheet-questions">${sheet.questions.map((question) => `<li>
-      <p>${escapeHtml(question.prompt)}</p>
-      <details><summary>Show answer and working</summary><p><strong>${escapeHtml(question.answer)}</strong></p><ol>${question.working.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol></details>
-    </li>`).join("")}</ol>
-    <button class="button button-light" type="button" onclick="window.print()">Print this worksheet</button>
+  return `<div class="course-material-list worksheet-list">${course.worksheets.map((sheet, sheetIndex) => `<article class="course-note-card course-worksheet">
+    <div class="course-note-kicker">STUDYGROUP PRACTICE · ${sheet.questions.length} QUESTIONS</div><h3>${escapeHtml(sheet.title)}</h3>
+    <p>Enter an answer for each question and check it straight away. Complete the whole sheet to earn 10 XP.</p>
+    <form class="worksheet-player" data-worksheet-id="${escapeHtml(`worksheet-${course.slug}-${sheetIndex + 1}`)}">
+      <ol class="worksheet-questions">${sheet.questions.map((question, questionIndex) => `<li class="worksheet-question" data-worksheet-question="${questionIndex}">
+        <label><span>${escapeHtml(question.prompt)}</span><input type="text" autocomplete="off" maxlength="500" placeholder="Type your answer…" required /></label>
+        <button class="worksheet-check-button" type="button" data-check-answer="${questionIndex}">Check answer</button>
+        <div class="worksheet-feedback" data-question-feedback="${questionIndex}" role="status" aria-live="polite"></div>
+        <details class="worksheet-working"><summary>Show a hint and working</summary><ol>${question.working.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol><p><strong>Answer: ${escapeHtml(question.answer)}</strong></p></details>
+      </li>`).join("")}</ol>
+      <div class="worksheet-result" data-worksheet-result role="status" aria-live="polite">0 of ${sheet.questions.length} correct</div>
+      <button class="button button-dark worksheet-complete" type="button" data-complete-worksheet disabled>Complete worksheet · earn 10 XP</button>
+    </form>
+    <button class="button button-light worksheet-print" type="button">Print this worksheet</button>
   </article>`).join("")}</div>`;
 }
 
@@ -106,36 +96,199 @@ if (!course || !["notes", "worksheets"].includes(pageType) || (topicSlug && (!no
     </section>
   </div>`;
   void renderSidebarAccount();
-  bindLessonCompletion();
+  bindFullLesson();
+  bindWorksheets();
 }
 
-function bindLessonCompletion() {
-  const lesson = document.querySelector("[data-lesson-slug]");
+function bindFullLesson() {
+  const lesson = document.querySelector(".lesson-player");
   if (!lesson) return;
-  const key = `studygroup-lesson:${lesson.dataset.lessonSlug}`;
-  const button = lesson.querySelector("[data-complete-lesson]");
-  const status = lesson.querySelector("[data-complete-status]");
-  const markComplete = () => {
+  const slides = Array.from(lesson.querySelectorAll("[data-lesson-slide]"));
+  const previous = lesson.querySelector("[data-slide-prev]");
+  const next = lesson.querySelector("[data-slide-next]");
+  const progress = lesson.querySelector("[data-slide-progress]");
+  const count = lesson.querySelector("[data-slide-count]");
+  const label = lesson.querySelector("[data-slide-label]");
+  const stepKey = `studygroup-lesson-step:${lesson.dataset.lessonSlug}`;
+  const completionKey = `studygroup-lesson:${lesson.dataset.lessonSlug}`;
+  let activeIndex = 0;
+  try {
+    activeIndex = Math.min(slides.length - 1, Math.max(0, Number(localStorage.getItem(stepKey)) || 0));
+  } catch (error) {
+    console.error("Could not restore the lesson position.", error);
+  }
+  const showSlide = (index) => {
+    activeIndex = Math.max(0, Math.min(slides.length - 1, index));
+    slides.forEach((slide, slideIndex) => { slide.hidden = slideIndex !== activeIndex; });
+    progress.value = activeIndex + 1;
+    count.textContent = `${activeIndex + 1} / ${slides.length}`;
+    label.textContent = activeIndex === slides.length - 1 ? "Ready to finish" : `Step ${activeIndex + 1} of ${slides.length}`;
+    previous.disabled = activeIndex === 0;
+    next.hidden = activeIndex === slides.length - 1;
+    next.disabled = Boolean(slides[activeIndex].querySelector(".lesson-self-check")?.dataset.checked !== "true");
     try {
-      localStorage.setItem(key, "completed");
-      button.classList.add("is-complete");
-      button.innerHTML = "Lesson complete <span>✓</span>";
-      status.textContent = "Nice work. Your progress is saved on this device.";
+      localStorage.setItem(stepKey, String(activeIndex));
     } catch (error) {
-      console.error("Could not save this lesson's completion status.", error);
-      status.textContent = "The lesson is complete, but progress could not be saved in this browser.";
+      console.error("Could not save the lesson position.", error);
     }
   };
-  try {
-    if (localStorage.getItem(key) === "completed") {
-      button.classList.add("is-complete");
-      button.innerHTML = "Lesson complete <span>✓</span>";
-      status.textContent = "You've already completed this lesson on this device.";
+  const selfChecks = Array.from(lesson.querySelectorAll(".lesson-self-check"));
+  selfChecks.forEach((form, index) => {
+    const savedAnswerKey = `${stepKey}:answer:${index}`;
+    const checkedKey = `${stepKey}:checked:${index}`;
+    const answer = form.querySelector("textarea");
+    try {
+      answer.value = localStorage.getItem(savedAnswerKey) || "";
+      if (localStorage.getItem(checkedKey) === "true") {
+        form.dataset.checked = "true";
+        form.querySelector(".lesson-answer-reveal").hidden = false;
+        form.querySelector(".lesson-check-button").disabled = true;
+      }
+    } catch (error) {
+      console.error("Could not restore a saved self-check.", error);
     }
-  } catch (error) {
-    console.error("Could not load this lesson's completion status.", error);
-  }
-  button.addEventListener("click", markComplete);
+    answer.addEventListener("input", () => {
+      try { localStorage.setItem(savedAnswerKey, answer.value); } catch (error) {
+        console.error("Could not save your self-check response.", error);
+      }
+    });
+  });
+  lesson.addEventListener("submit", (event) => {
+    const form = event.target.closest(".lesson-self-check");
+    if (!form) return;
+    event.preventDefault();
+    const answer = form.querySelector("textarea");
+    if (!answer.value.trim()) {
+      answer.focus();
+      answer.setCustomValidity("Write an attempt before comparing answers.");
+      answer.reportValidity();
+      answer.setCustomValidity("");
+      return;
+    }
+    form.dataset.checked = "true";
+    form.querySelector(".lesson-answer-reveal").hidden = false;
+    form.querySelector(".lesson-check-button").disabled = true;
+    const formIndex = selfChecks.indexOf(form);
+    try { localStorage.setItem(`${stepKey}:checked:${formIndex}`, "true"); } catch (error) {
+      console.error("Could not save your self-check progress.", error);
+    }
+    next.disabled = false;
+  });
+  lesson.querySelectorAll("[data-reflection]").forEach((input) => {
+    const key = `${stepKey}:reflection:${input.dataset.reflection}`;
+    try { input.value = localStorage.getItem(key) || ""; } catch (error) {
+      console.error("Could not restore a saved reflection.", error);
+    }
+    input.addEventListener("input", () => {
+      try { localStorage.setItem(key, input.value); } catch (error) {
+        console.error("Could not save a lesson reflection.", error);
+      }
+    });
+  });
+  previous.addEventListener("click", () => showSlide(activeIndex - 1));
+  next.addEventListener("click", () => showSlide(activeIndex + 1));
+  const completeButton = lesson.querySelector("[data-complete-lesson]");
+  const status = lesson.querySelector("[data-complete-status]");
+  completeButton.addEventListener("click", async () => {
+    completeButton.disabled = true;
+    completeButton.textContent = "Saving your progress…";
+    try {
+      const session = await authClient.getSession();
+      if (session.error) throw session.error;
+      if (session.data?.user) {
+        const result = await completeActivity(lesson.dataset.activityId);
+        status.textContent = result.awarded
+          ? "Lesson complete — 10 XP earned. Your progress is saved to your account."
+          : "You already completed this lesson and earned its XP.";
+      } else {
+        status.textContent = "Lesson complete on this device. Sign in to save progress and earn leaderboard XP.";
+      }
+      localStorage.setItem(completionKey, "completed");
+      localStorage.removeItem(stepKey);
+      completeButton.classList.add("is-complete");
+      completeButton.textContent = "Lesson complete ✓";
+    } catch (error) {
+      console.error("Could not complete the lesson.", error);
+      status.textContent = error.message || "Progress could not be saved. Please try again.";
+      completeButton.disabled = false;
+      completeButton.textContent = "Try saving again · earn 10 XP";
+    }
+  });
+  showSlide(activeIndex);
+}
+
+function normalizeAnswer(value) {
+  return String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[−–]/g, "-").replace(/[\s.,!?;:'"()\[\]{}]/g, "");
+}
+
+function bindWorksheets() {
+  document.querySelectorAll(".worksheet-player").forEach((worksheet) => {
+    const questions = Array.from(worksheet.querySelectorAll("[data-worksheet-question]"));
+    const result = worksheet.querySelector("[data-worksheet-result]");
+    const completeButton = worksheet.querySelector("[data-complete-worksheet]");
+    const completionKey = `studygroup-worksheet:${worksheet.dataset.worksheetId}`;
+    let completedOnDevice = false;
+    try { completedOnDevice = localStorage.getItem(completionKey) === "completed"; } catch (error) {
+      console.error("Could not restore worksheet completion.", error);
+    }
+    if (completedOnDevice) result.textContent = "Worksheet completed on this device. Check your answers again any time.";
+    worksheet.addEventListener("click", async (event) => {
+      const checkButton = event.target.closest("[data-check-answer]");
+      if (checkButton) {
+        const question = questions[Number(checkButton.dataset.checkAnswer)];
+        const input = question.querySelector("input");
+        const feedback = question.querySelector("[data-question-feedback]");
+        const sheet = course.worksheets[Number(worksheet.dataset.worksheetId.split("-").at(-1)) - 1];
+        const correctAnswer = sheet.questions[Number(checkButton.dataset.checkAnswer)].answer;
+        if (!input.value.trim()) {
+          input.focus();
+          feedback.textContent = "Enter an answer before checking.";
+          feedback.classList.add("is-error");
+          return;
+        }
+        feedback.classList.remove("is-error", "is-correct");
+        if (normalizeAnswer(input.value) === normalizeAnswer(correctAnswer)) {
+          question.dataset.correct = "true";
+          input.disabled = true;
+          checkButton.disabled = true;
+          feedback.innerHTML = `<strong>Correct!</strong> ${escapeHtml(sheet.questions[Number(checkButton.dataset.checkAnswer)].working.join(" "))} Answer: ${escapeHtml(correctAnswer)}`;
+          feedback.classList.add("is-correct");
+        } else {
+          feedback.textContent = `Not quite yet. Try again; hint: ${sheet.questions[Number(checkButton.dataset.checkAnswer)].working[0]}`;
+          feedback.classList.add("is-error");
+        }
+        const score = questions.filter((item) => item.dataset.correct === "true").length;
+        result.textContent = `${score} of ${questions.length} correct`;
+        completeButton.disabled = score !== questions.length;
+        return;
+      }
+      if (event.target.closest(".worksheet-print")) window.print();
+      const awardButton = event.target.closest("[data-complete-worksheet]");
+      if (!awardButton || awardButton.disabled) return;
+      awardButton.disabled = true;
+      awardButton.textContent = "Saving your progress…";
+      try {
+        const session = await authClient.getSession();
+        if (session.error) throw session.error;
+        if (session.data?.user) {
+          const award = await completeActivity(worksheet.dataset.worksheetId);
+          result.textContent = award.awarded
+            ? "All answers correct — 10 XP earned. Your progress is saved."
+            : "Worksheet complete — you already earned its XP.";
+        } else {
+          result.textContent = "All answers correct — worksheet completed on this device. Sign in to save it and earn XP.";
+        }
+        localStorage.setItem(completionKey, "completed");
+        awardButton.textContent = "Worksheet complete ✓";
+      } catch (error) {
+        console.error("Could not save worksheet completion.", error);
+        result.textContent = error.message || "Progress could not be saved. Please try again.";
+        awardButton.disabled = false;
+        awardButton.textContent = "Try saving again · earn 10 XP";
+      }
+    });
+  });
 }
 
 async function renderSidebarAccount() {
@@ -147,18 +300,26 @@ async function renderSidebarAccount() {
     const user = result.data?.user;
     if (!user) return;
     let name = user.name || user.email?.split("@")[0] || "Learner";
+    let handle = name.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 15) || "learner";
+    let nameTag = null;
     try {
       const userId = user.uid || user.id;
       if (!userId) throw new Error("The signed-in account does not include a user ID.");
       const profile = await getDoc(doc(db, "users", userId));
       const displayName = profile.data()?.displayName;
       if (typeof displayName === "string" && displayName.trim()) name = displayName.trim();
+      handle = profile.data()?.handle || handle;
+      const progress = await getDocs(query(collection(db, "users", userId, "learningProgress"), limit(100)));
+      const xp = progress.docs.reduce((total, entry) => {
+        const data = entry.data();
+        return data.completed ? total + (Number(data.xp) || 10) : total;
+      }, 0);
+      nameTag = earnedNameTag(xp);
     } catch (error) {
       console.error("Could not load the account name for the subject library.", error);
     }
-    const handle = name.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 15) || "learner";
     container.innerHTML = `<details class="course-account-menu">
-      <summary><span class="course-account-avatar">${escapeHtml(name.slice(0, 1).toUpperCase())}</span><span class="course-account-copy"><strong>${escapeHtml(name)}</strong><small>@${escapeHtml(handle)}</small></span><span class="course-account-chevron"></span></summary>
+      <summary><span class="course-account-avatar">${escapeHtml(name.slice(0, 1).toUpperCase())}</span><span class="course-account-copy"><strong>${escapeHtml(name)}${nameTag ? ` <span class="earned-name-tag">${escapeHtml(`[${nameTag.tag}]`)}</span>` : ""}</strong><small>@${escapeHtml(handle)}</small></span><span class="course-account-chevron"></span></summary>
       <div class="course-account-popover"><a href="/dashboard/?settings=profile">Profile & account settings</a><a href="/dashboard/">My study dashboard</a><button type="button" id="course-sign-out">Log out</button></div>
     </details>`;
     container.querySelector("#course-sign-out").addEventListener("click", async () => {

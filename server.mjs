@@ -948,7 +948,12 @@ const server = createServer(async (request, response) => {
   const userId = identity?.id || null;
   const isPublicSchoolApplication = path === "/api/schools" && body.action === "apply";
   if (!identity && body.op !== "list" && !isPublicSchoolApplication) {
-    sendJson(response, 401, { error: "A valid Neon Auth session is required." }, origin);
+    const sentBearerToken = /^Bearer\s+\S+$/i.test(request.headers.authorization || "");
+    sendJson(response, 401, {
+      error: sentBearerToken
+        ? "Render received a bearer token, but Neon Auth did not accept it. Confirm NEON_AUTH_BASE_URL and NEON_AUTH_JWKS_URL both point to the same Neon production branch as the website's Auth URL, then sign out and back in."
+        : "Render received no bearer token. Sign out of StudyGroup, sign back in, then try again."
+    }, origin);
     return;
   }
 

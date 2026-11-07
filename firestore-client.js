@@ -158,6 +158,10 @@ export async function completeActivity(activityId) {
   return request({ op: "completeActivity", activityId });
 }
 
+export async function syncLeaderboardXp() {
+  return request({ op: "syncXp" });
+}
+
 export async function deleteDoc(ref) {
   await request({ op: "delete", path: ref.path });
 }

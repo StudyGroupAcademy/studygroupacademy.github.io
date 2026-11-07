@@ -1,5 +1,4 @@
 import { authClient } from "./auth-client.js";
-import { getDoc, serverTimestamp, updateDoc } from "./firestore-client.js";
 import {
   $,
   $$,
@@ -10,20 +9,18 @@ import {
   showToast,
   state
 } from "./core.js";
-import { cleanNickname, consumeOAuthCallback, describeOAuthError, validNickname } from "./helpers.js";
+import { cleanNickname, consumeOAuthCallback, describeOAuthError, earnedNameTag, NAME_TAG_MILESTONES, validNickname } from "./helpers.js";
 import { initLeaderboard, loadLeaderboard } from "./leaderboard.js";
 import { initResourceFilter, setLessonUser } from "./resources.js";
 import { initSchoolPortal, startSchoolPortal } from "./school-portal.js";
 import {
   ensureUserProfile,
-  leaderboardReference,
   NICKNAME_RULE,
   saveProfileChoices,
   takeWelcomeFlag
 } from "./session.js";
 import { exportData, initWorkspaceUI, startWorkspace, stopWorkspace } from "./workspace.js";
 
-const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const profileDialog = $("#profile-dialog");
 const profileForm = $("#profile-form");
 const leaderboardList = $("#leaderboard-list");
@@ -50,14 +47,36 @@ function renderAccount() {
   $("#account-email").textContent = state.user.email || "";
   $("#workspace-name").textContent = accountName;
   $("#account-handle").textContent = `@${state.profile?.handle || nickname.toLowerCase().replace(/[^a-z0-9]+/g, "")}`;
-  $("#account-badge").textContent = state.profile?.badge || "Learner";
+  renderNameTag(Number(state.profile?.xp) || 0);
   const canCheckIn = Boolean(state.profile?.leaderboardOptIn);
-  $("#member-checkin").hidden = !canCheckIn;
   $("#member-join").hidden = canCheckIn || !state.profile;
-  $("#checkin-name").textContent = nickname;
-  const checkedToday = leaderboardList.dataset.checkedInUid === state.user.uid;
-  $("#daily-checkin").disabled = checkedToday || !canCheckIn;
-  $("#daily-checkin").textContent = checkedToday ? "You checked in today ✓" : "Check in for today +1";
+  $("#member-xp").hidden = !canCheckIn;
+  $("#member-xp-value").textContent = String(Number(state.profile?.xp) || 0);
+}
+
+function renderNameTag(xp) {
+  const tag = earnedNameTag(xp);
+  for (const selector of ["#header-name-tag", "#workspace-name-tag"]) {
+    const element = $(selector);
+    element.textContent = tag ? `[${tag.tag}]` : "";
+    element.hidden = !tag;
+  }
+  const accountTag = $("#account-badge");
+  accountTag.textContent = tag ? `Earned name tag · ${tag.tag}` : `Next name tag at ${NAME_TAG_MILESTONES[0].xp} XP`;
+  renderAchievements(xp);
+}
+
+function renderAchievements(xp) {
+  $("#badge-summary").textContent = `${xp} XP earned · Name tags unlock through lessons and worksheet achievements.`;
+  $("#badge-grid").innerHTML = NAME_TAG_MILESTONES.map((milestone) => {
+    const unlocked = xp >= milestone.xp;
+    return `<article class="badge${unlocked ? " is-unlocked" : ""}">
+      <span class="badge-icon">${unlocked ? "✦" : "◇"}</span>
+      <strong>${milestone.tag}</strong>
+      <small>${milestone.description}</small>
+      <em>${unlocked ? "Unlocked · shown next to your name" : `${milestone.xp - xp} XP to unlock`}</em>
+    </article>`;
+  }).join("");
 }
 
 function openProfileDialog(welcome = false) {
@@ -68,7 +87,6 @@ function openProfileDialog(welcome = false) {
   profileForm.elements.nickname.value = state.profile?.nickname || state.profile?.displayName || "";
   profileForm.elements.handle.value = state.profile?.handle || "";
   profileForm.elements.bio.value = state.profile?.bio || "";
-  profileForm.elements.badge.value = state.profile?.badge || "Learner";
   const boards = state.profile?.boards || {};
   for (const subject of ["maths", "english-language", "english-literature", "biology", "chemistry", "physics", "history", "geography", "computer-science", "french", "spanish"]) {
     profileForm.elements[`board-${subject}`].value = boards[subject] || "";
@@ -82,30 +100,11 @@ function openProfileDialog(welcome = false) {
   if (!profileDialog.open) profileDialog.showModal();
 }
 
-async function updateCheckinStatus() {
-  if (!state.user || !state.profile?.leaderboardOptIn) {
-    leaderboardList.dataset.checkedInUid = "";
-    renderAccount();
-    return;
-  }
-  try {
-    const snapshot = await getDoc(leaderboardReference(state.user.uid));
-    const lastPointAt = snapshot.data()?.lastPointAt;
-    const checkedIn = lastPointAt?.toDate && Date.now() - lastPointAt.toDate().getTime() < DAY_IN_MS;
-    leaderboardList.dataset.checkedInUid = checkedIn ? state.user.uid : "";
-    renderAccount();
-  } catch (error) {
-    console.error("Could not check the student's leaderboard check-in status.", error);
-    showBanner(getErrorMessage(error), true);
-  }
-}
-
 let lastBoardLoad = 0;
 
 async function refreshBoard() {
   lastBoardLoad = Date.now();
   await loadLeaderboard();
-  await updateCheckinStatus();
 }
 
 async function loadUser(user) {
@@ -213,7 +212,6 @@ profileForm.addEventListener("submit", async (event) => {
   const displayName = cleanNickname(String(formValues.get("displayName") || ""));
   const handle = String(formValues.get("handle") || "").trim().replace(/^@/, "");
   const bio = String(formValues.get("bio") || "").trim();
-  const badge = String(formValues.get("badge") || "Learner");
   const boards = Object.fromEntries(["maths", "english-language", "english-literature", "biology", "chemistry", "physics", "history", "geography", "computer-science", "french", "spanish"]
     .map((subject) => [subject, String(formValues.get(`board-${subject}`) || "")]).filter(([, board]) => board));
   const optIn = profileForm.elements.leaderboardOptIn.checked;
@@ -227,7 +225,7 @@ profileForm.addEventListener("submit", async (event) => {
   submitButton.disabled = true;
   submitButton.textContent = "Saving your preferences…";
   try {
-    await saveProfileChoices({ displayName, nickname, handle, bio, badge, boards }, optIn);
+    await saveProfileChoices({ displayName, nickname, handle, bio, boards }, optIn);
     renderAccount();
     profileDialog.dataset.onboarding = "false";
     profileDialog.querySelector("[data-close-dialog]").hidden = false;
@@ -280,38 +278,10 @@ $("#member-join").addEventListener("click", () => {
   profileForm.elements.leaderboardOptIn.checked = true;
 });
 
-$("#daily-checkin").addEventListener("click", async () => {
-  if (!state.user || !state.profile?.leaderboardOptIn) return;
-  const checkInButton = $("#daily-checkin");
-  checkInButton.disabled = true;
-  checkInButton.textContent = "Checking you in…";
-  try {
-    const reference = leaderboardReference(state.user.uid);
-    const snapshot = await getDoc(reference);
-    if (!snapshot.exists()) {
-      throw new Error("Your public study profile could not be found. Try switching the leaderboard off and on in your profile.");
-    }
-    const lastPointAt = snapshot.data().lastPointAt;
-    if (lastPointAt?.toDate && Date.now() - lastPointAt.toDate().getTime() < DAY_IN_MS) {
-      leaderboardList.dataset.checkedInUid = state.user.uid;
-      renderAccount();
-      showToast("You've already checked in today. Come back tomorrow for another point.");
-      return;
-    }
-    await updateDoc(reference, {
-      points: snapshot.data().points + 1,
-      lastPointAt: serverTimestamp()
-    });
-    await loadLeaderboard();
-    leaderboardList.dataset.checkedInUid = state.user.uid;
-    renderAccount();
-    showToast("You showed up for yourself today. That counts. ✳");
-  } catch (error) {
-    console.error("The daily leaderboard check-in failed.", error);
-    showToast(getErrorMessage(error));
-    checkInButton.disabled = false;
-    checkInButton.textContent = "Check in for today +1";
-  }
+window.addEventListener("studygroup:xpprogress", (event) => {
+  if (!state.profile) return;
+  state.profile.xp = Number(event.detail?.xp) || 0;
+  renderAccount();
 });
 
 document.addEventListener("studygroup:tab", (event) => {
