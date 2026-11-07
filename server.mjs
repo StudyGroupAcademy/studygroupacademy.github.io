@@ -327,7 +327,7 @@ const server = createServer(async (request, response) => {
   if (request.method === "OPTIONS") {
     response.writeHead(204, {
       "Access-Control-Allow-Origin": origin,
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
       "Access-Control-Max-Age": "86400"
     });
@@ -349,6 +349,23 @@ const server = createServer(async (request, response) => {
       const body = await readJson(request);
       const result = await schoolRequest(identity, body);
       sendJson(response, 200, result, origin);
+      return;
+    }
+
+    if (url.pathname === "/api/profile") {
+      if (request.method !== "POST" && request.method !== "PUT") throw new Error("Method not allowed.");
+      if (!identity) throw new Error("Sign in to continue.");
+      
+      const body = await readJson(request);
+      const displayName = requiredText(body.displayName, "Display name", 80);
+
+      await pool.query(
+        `UPDATE app_records SET data = jsonb_set(data, '{displayName}', to_jsonb($1::text)), updated_at = now() 
+         WHERE path = $2 AND owner_id = $3`,
+        [displayName, `users/${identity.id}/profile`, identity.id]
+      );
+
+      sendJson(response, 200, { ok: true, displayName }, origin);
       return;
     }
 
