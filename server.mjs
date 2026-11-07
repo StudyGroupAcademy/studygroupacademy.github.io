@@ -132,6 +132,190 @@ async function canReadRecord(client, uid, path) {
   return groupId ? isGroupMember(client, uid, groupId) : false;
 }
 
+async function authorizeMutation(client, uid, change, existing) {
+  const path = change.path;
+  if (path[0] === "users" && path[1] === uid) return uid;
+  if (path[0] === "publicLeaderboard" && path[1] === uid) return uid;
+  if (path[0] === "groupCodes" && path.length === 2) {
+    if (change.op === "delete") {
+      if (existing?.owner_id !== uid) throw new Error("Only the group owner can remove its invite code.");
+      return uid;
+    }
+    if (change.data?.ownerId !== uid && existing?.owner_id !== uid) {
+      throw new Error("Only the group owner can create an invite code.");
+    }
+    return uid;
+  }
+  const groupId = groupIdForPath(path);
+  if (!groupId) throw new Error("This data collection is not available.");
+
+  const group = await record(client, `groups/${groupId}`);
+  if (!group && path.length === 2 && change.op === "set" && change.data?.ownerId === uid
+    && change.data?.memberIds?.includes(uid)) {
+    return uid;
+  }
+  if (group && await isGroupMember(client, uid, groupId)) {
+    if (path.length === 2 && change.op !== "delete" && change.data?.ownerId !== undefined
+      && change.data.ownerId !== group.data.ownerId) {
+      throw new Error("Group ownership cannot be changed.");
+    }
+    return uid;
+  }
+
+  const joinOperation = path.length === 2 && change.op === "update"
+    && change.data?.memberIds?.__studygroupOperation === "arrayUnion"
+    && change.data.memberIds.values?.length === 1
+    && change.data.memberIds.values[0] === uid;
+  if (group && joinOperation) {
+    const codes = await client.query(
+      "SELECT data FROM app_records WHERE path LIKE 'groupCodes/%' AND data->>'groupId' = $1 LIMIT 1",
+      [groupId]
+    );
+    if (codes.rowCount) return uid;
+  }
+  throw new Error("You don't have permission to change this data.");
+}
+
+async function applyMutation(client, uid, change, trustedActivity = false) {
+  const path = assertPath(change.path);
+  const existing = await record(client, path);
+  if (path[0] === "users" && path[1] === uid && path[2] === "learningProgress" && !trustedActivity) {
+    throw new Error("Learning progress is saved only through a completed activity.");
+  }
+  if (path[0] === "publicLeaderboard" && change.data?.xp !== undefined
+    && !(change.op === "set" && !existing && Number(change.data.xp) === 0)) {
+    throw new Error("XP is awarded only when you complete an activity.");
+  }
+  if (change.op === "delete") {
+    if (!existing) return;
+    await authorizeMutation(client, uid, change, existing);
+    await client.query("DELETE FROM app_records WHERE path = $1", [path]);
+    return;
+  }
+  if (change.op !== "set" && change.op !== "update") throw new Error("Unsupported database operation.");
+  if (!change.data || typeof change.data !== "object" || Array.isArray(change.data)) {
+    throw new Error("Database records must be JSON objects.");
+  }
+  if (change.op === "update" && !existing) throw new Error("The requested record does not exist.");
+  const ownerId = await authorizeMutation(client, uid, change, existing);
+  const nextData = change.op === "update" || change.merge
+    ? applyFields(existing?.data, change.data)
+    : applyFields(null, change.data);
+  await client.query(
+    `INSERT INTO app_records (path, owner_id, data, updated_at)
+     VALUES ($1, $2, $3::jsonb, now())
+     ON CONFLICT (path) DO UPDATE SET owner_id = EXCLUDED.owner_id, data = EXCLUDED.data, updated_at = now()`,
+    [path, ownerId, JSON.stringify(nextData)]
+  );
+}
+
+function readField(data, path) {
+  return path.split(".").reduce((value, key) => value?.[key], data);
+}
+
+function matchesFilter(data, filter) {
+  const actual = readField(data, filter.field);
+  if (filter.operator === "==") return JSON.stringify(actual) === JSON.stringify(serializeValue(filter.value));
+  if (filter.operator === "array-contains") {
+    return Array.isArray(actual) && actual.some((value) => JSON.stringify(value) === JSON.stringify(serializeValue(filter.value)));
+  }
+  throw new Error("This query filter is not supported.");
+}
+
+async function listRecords(client, uid, collectionPath, constraints = []) {
+  const parent = assertPath(collectionPath, "collection");
+  const prefix = `${parent}/`;
+  const result = await client.query(
+    "SELECT path, owner_id, data FROM app_records WHERE path LIKE $1 AND array_length(string_to_array(path, '/'), 1) = $2",
+    [`${prefix}%`, collectionPath.length + 1]
+  );
+  let rows = [];
+  for (const row of result.rows) {
+    if (await canReadRecord(client, uid, row.path.split("/"))) rows.push(row);
+  }
+  for (const filter of constraints.filter((item) => item.kind === "where")) {
+    rows = rows.filter((row) => matchesFilter(row.data, filter));
+  }
+  for (const order of constraints.filter((item) => item.kind === "orderBy")) {
+    rows.sort((a, b) => {
+      const first = readField(a.data, order.field);
+      const second = readField(b.data, order.field);
+      const left = first?.__studygroupTimestamp || first || "";
+      const right = second?.__studygroupTimestamp || second || "";
+      return (left < right ? -1 : left > right ? 1 : 0) * (order.direction === "desc" ? -1 : 1);
+    });
+  }
+  const cap = constraints.find((item) => item.kind === "limit")?.count;
+  if (cap !== undefined) rows = rows.slice(0, Math.max(0, Math.min(500, Number(cap) || 0)));
+  return rows;
+}
+
+async function readJson(request) {
+  const chunks = [];
+  let length = 0;
+  for await (const chunk of request) {
+    length += chunk.length;
+    if (length > 2 * 1024 * 1024) throw new Error("Request body is too large.");
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+}
+
+async function dataRequest(uid, body) {
+  if (body.op === "get") {
+    const path = body.path;
+    const key = assertPath(path);
+    if (!await canReadRecord(pool, uid, path)) throw new Error("You don't have permission to read this data.");
+    const result = await record(pool, key);
+    return { data: result?.data ?? null };
+  }
+  if (body.op === "list") {
+    const docs = await listRecords(pool, uid, body.path, body.constraints);
+    return { docs: docs.map(({ path, data }) => ({ path: path.split("/"), data })) };
+  }
+  if (body.op === "set" || body.op === "update" || body.op === "delete") {
+    await pool.query("BEGIN");
+    try {
+      await applyMutation(pool, uid, body);
+      await pool.query("COMMIT");
+    } catch (error) {
+      await pool.query("ROLLBACK");
+      throw error;
+    }
+    return { ok: true };
+  }
+  if (body.op === "batch") {
+    if (!Array.isArray(body.changes) || body.changes.length < 1 || body.changes.length > 500) {
+      throw new Error("A batch must contain between 1 and 500 changes.");
+    }
+    await pool.query("BEGIN");
+    try {
+      for (const change of body.changes) await applyMutation(pool, uid, change);
+      await pool.query("COMMIT");
+    } catch (error) {
+      await pool.query("ROLLBACK");
+      throw error;
+    }
+    return { ok: true };
+  }
+  throw new Error("Unsupported database request.");
+}
+
+function sendJson(response, status, body, origin) {
+  response.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": origin || "*",
+    "Vary": "Origin"
+  });
+  response.end(JSON.stringify(body));
+}
+
+function requestOrigin(request) {
+  const origin = request.headers.origin;
+  return allowedOrigins.has(origin) ? origin : null;
+}
+
 async function authenticatedUser(request) {
   const authorization = request.headers.authorization || "";
   const match = authorization.match(/^Bearer ([^\s]+)$/);
@@ -150,184 +334,12 @@ async function authenticatedUser(request) {
   }
 }
 
-function requiredText(value, label, maxLength) {
-  if (typeof value !== "string" || !value.trim() || value.trim().length > maxLength) {
-    throw new Error(`${label} is required and must be no longer than ${maxLength} characters.`);
-  }
-  return value.trim();
-}
-
-async function schoolMember(userId, schoolId) {
-  const result = await pool.query(
-    `SELECT m.school_id, m.user_id, m.email, m.display_name, m.role, m.permissions, m.active,
-            s.name AS school_name, s.domain AS school_domain
-     FROM school_members m JOIN schools s ON s.id = m.school_id
-     WHERE m.user_id = $1 AND m.school_id = $2 AND m.active = true`,
-    [userId, schoolId]
-  );
-  return result.rows[0] || null;
-}
-
-async function requireSchoolPermission(userId, schoolId, permission) {
-  const member = await schoolMember(userId, schoolId);
-  if (!member) throw new Error("You are not an active member of this school.");
-  if (member.role !== "school_admin" && !member.permissions.includes(permission)) {
-    throw new Error(`Your school has not granted the ${permission.replaceAll("_", " ")} permission.`);
-  }
-  return member;
-}
-
-async function schoolRequestAssignments(identity, member) {
-  if (member.role === "teacher") {
-    const res = await pool.query(
-      `SELECT a.id, a.school_id, a.title, a.subject, a.instructions, a.due_at, a.attachment, a.created_by, a.created_at
-       FROM school_assignments a JOIN assignment_teachers t ON t.assignment_id = a.id
-       WHERE a.school_id = $1 AND t.user_id = $2 ORDER BY a.due_at ASC NULLS LAST`,
-      [member.school_id, identity.id]
-    );
-    return res.rows;
-  } else {
-    const res = await pool.query(
-      `SELECT id, school_id, title, subject, instructions, due_at, attachment, created_by, created_at
-       FROM school_assignments WHERE school_id = $1 ORDER BY due_at ASC NULLS LAST`,
-      [member.school_id]
-    );
-    return res.rows;
-  }
-}
-
-function sendJson(response, status, body, origin) {
-  response.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-    "Access-Control-Allow-Origin": origin || "*",
-    "Vary": "Origin"
-  });
-  response.end(JSON.stringify(body));
-}
-
-function requestOrigin(request) {
-  const origin = request.headers.origin;
-  return allowedOrigins.has(origin) ? origin : null;
-}
-
-async function readJson(request) {
-  const chunks = [];
-  let length = 0;
-  for await (const chunk of request) {
-    length += chunk.length;
-    if (length > 2 * 1024 * 1024) throw new Error("Request body is too large.");
-    chunks.push(chunk);
-  }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-}
-
-async function schoolRequest(identity, body) {
-  const action = body.action;
-  if (action === "apply") {
-    const schoolName = requiredText(body.schoolName, "School name", 160);
-    const website = requiredText(body.website, "School website", 250);
-    const address = requiredText(body.address, "School address", 400);
-    const contactName = requiredText(body.contactName, "Contact name", 120);
-    const contactEmail = requiredText(body.contactEmail, "Contact email", 254).toLowerCase();
-    const verificationDetails = requiredText(body.verificationDetails, "School verification details", 2000);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) throw new Error("Enter a valid school contact email.");
-    const websiteUrl = new URL(website.startsWith("http") ? website : `https://${website}`);
-    if (!["https:", "http:"].includes(websiteUrl.protocol)) throw new Error("Enter a valid school website.");
-    const schoolDomain = websiteUrl.hostname.replace(/^www\./, "").toLowerCase();
-    const result = await pool.query(
-      `INSERT INTO school_applications
-        (school_name, school_domain, website, address, contact_name, contact_email, verification_details)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, school_name, school_domain, status, created_at`,
-      [schoolName, schoolDomain, websiteUrl.toString(), address, contactName, contactEmail, verificationDetails]
-    );
-    const application = result.rows[0];
-    await pool.query(
-      `INSERT INTO school_notifications (recipient_email, kind, title, body, target_id)
-       VALUES ($1, 'school_application', $2, $3, $4)`,
-      [schoolAdminEmail, `School approval requested: ${schoolName}`, `${contactName} (${contactEmail}) submitted a school application.`, application.id]
-    );
-    return { application };
-  }
-
-  if (!identity) throw new Error("Sign in to continue.");
-
-  if (action === "context") {
-    const memberResult = await pool.query(
-      `SELECT m.school_id, m.user_id, m.email, m.display_name, m.role, m.permissions, m.active,
-              s.name AS school_name, s.domain AS school_domain
-       FROM school_members m JOIN schools s ON s.id = m.school_id
-       WHERE m.user_id = $1 AND m.active = true LIMIT 1`,
-      [identity.id]
-    );
-    const member = memberResult.rows[0] || null;
-    if (!member) {
-      const pending = await pool.query(
-        `SELECT id, school_name, status, created_at FROM school_applications
-         WHERE contact_email = $1 ORDER BY created_at DESC LIMIT 1`,
-        [identity.email]
-      );
-      const notifications = await pool.query(
-        `SELECT id, kind, title, body, created_at FROM school_notifications
-         WHERE recipient_id = $1 ORDER BY created_at DESC LIMIT 40`,
-        [identity.id]
-      );
-      return { member: null, pendingApplication: pending.rows[0] || null, notifications: notifications.rows };
-    }
-
-    if (member.role === "student" && !member.permissions.includes("view_homework")) {
-      return { member, assignments: [], teachers: [], notifications: [] };
-    }
-    const assignments = await schoolRequestAssignments(identity, member);
-    const teachers = await pool.query(
-      `SELECT user_id, email, display_name, permissions FROM school_members
-       WHERE school_id = $1 AND role = 'teacher' AND active = true AND permissions @> ARRAY['edit_shared_homework']::text[]
-       ORDER BY display_name`,
-      [member.school_id]
-    );
-    const notifications = await pool.query(
-      `SELECT id, kind, title, body, target_id, read_at, created_at FROM school_notifications
-       WHERE recipient_id = $1 ORDER BY created_at DESC LIMIT 40`,
-      [identity.id]
-    );
-    return { member, assignments, teachers: teachers.rows, notifications: notifications.rows };
-  }
-
-  if (action === "submit-assignment") {
-    const assignmentId = requiredText(body.assignmentId, "Homework", 50);
-    const memberResult = await pool.query(
-      "SELECT school_id, role, permissions FROM school_members WHERE user_id = $1 AND active = true",
-      [identity.id]
-    );
-    const member = memberResult.rows[0];
-    if (!member || member.role !== "student" || !member.permissions.includes("upload_submissions")) {
-      throw new Error("You do not have permission to submit homework.");
-    }
-    const attachment = body.attachment;
-    if (!attachment || typeof attachment.url !== "string" || typeof attachment.publicId !== "string") {
-      throw new Error("A valid file attachment is required for submission.");
-    }
-    const result = await pool.query(
-      `INSERT INTO school_submissions (assignment_id, user_id, attachment)
-       VALUES ($1, $2, $3::jsonb)
-       ON CONFLICT (assignment_id, user_id)
-       DO UPDATE SET attachment = EXCLUDED.attachment, updated_at = now()
-       RETURNING id, assignment_id, user_id, attachment, submitted_at`,
-      [assignmentId, identity.id, JSON.stringify(attachment)]
-    );
-    return { submission: result.rows[0] };
-  }
-
-  throw new Error("Unknown school action.");
-}
-
 const server = createServer(async (request, response) => {
   const origin = requestOrigin(request) || frontendOrigin;
   if (request.method === "OPTIONS") {
     response.writeHead(204, {
       "Access-Control-Allow-Origin": origin,
-      "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
       "Access-Control-Max-Age": "86400"
     });
@@ -344,28 +356,11 @@ const server = createServer(async (request, response) => {
 
     const identity = await authenticatedUser(request);
 
-    if (url.pathname === "/api/school") {
+    if (url.pathname === "/api/data") {
       if (request.method !== "POST") throw new Error("Method not allowed.");
       const body = await readJson(request);
-      const result = await schoolRequest(identity, body);
+      const result = await dataRequest(identity?.id || null, body);
       sendJson(response, 200, result, origin);
-      return;
-    }
-
-    if (url.pathname === "/api/profile") {
-      if (request.method !== "POST" && request.method !== "PUT") throw new Error("Method not allowed.");
-      if (!identity) throw new Error("Sign in to continue.");
-      
-      const body = await readJson(request);
-      const displayName = requiredText(body.displayName, "Display name", 80);
-
-      await pool.query(
-        `UPDATE app_records SET data = jsonb_set(data, '{displayName}', to_jsonb($1::text)), updated_at = now() 
-         WHERE path = $2 AND owner_id = $3`,
-        [displayName, `users/${identity.id}/profile`, identity.id]
-      );
-
-      sendJson(response, 200, { ok: true, displayName }, origin);
       return;
     }
 
