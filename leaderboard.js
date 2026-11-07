@@ -5,7 +5,7 @@ import {
   orderBy,
   query,
   where
-} from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
+} from "./firestore-client.js";
 import { $, $$, db, getErrorMessage, state } from "./core.js";
 import { escapeHTML, weekStartKey } from "./helpers.js";
 

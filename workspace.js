@@ -14,12 +14,13 @@ import {
   updateDoc,
   where,
   writeBatch
-} from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
+} from "./firestore-client.js";
 import { $, $$, db, getErrorMessage, showBanner, showToast, state } from "./core.js";
 import { clearData, initInsights, setData } from "./insights.js";
 import { startGrades, stopGrades } from "./grades.js";
 import { startNotes, stopNotes } from "./notes.js";
 import { addWeeklyMinutes } from "./session.js";
+import { initCalculator } from "./calculator.js";
 import {
   computeStats,
   dateKey,
@@ -36,6 +37,7 @@ import {
 
 const ws = {
   tasks: [],
+  schoolAssignments: [],
   sessions: [],
   decks: [],
   exams: [],
@@ -45,7 +47,9 @@ const ws = {
   listeners: [],
   chatListener: null,
   chatFirstRender: true,
-  bound: false
+  bound: false,
+  calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  calendarSelected: dateKey(new Date())
 };
 
 const timer = { mode: "focus", running: false, endAt: 0, remaining: 1500, total: 1500, handle: null };
@@ -116,6 +120,7 @@ function sortTasks(tasks) {
     const firstDue = first.due || "9999-12-31";
     const secondDue = second.due || "9999-12-31";
     if (firstDue !== secondDue) return firstDue < secondDue ? -1 : 1;
+    if (first.time !== second.time) return (first.time || "99:99").localeCompare(second.time || "99:99");
     return (first.date?.getTime() || 0) - (second.date?.getTime() || 0);
   });
 }
@@ -128,16 +133,76 @@ function renderTasks() {
   const list = $("#task-list");
   if (visible.length === 0) {
     list.innerHTML = emptyMarkup("✳", "Nothing here yet", filter === "done" ? "Finished tasks will show up here." : "Add a task above to plan your next small step.");
+    renderCalendar();
     return;
   }
   list.innerHTML = visible.map((task) => {
     const overdue = !task.done && task.due && describeDue(task.due).startsWith("Overdue");
     return `<div class="item task${task.done ? " is-done" : ""}${overdue ? " is-overdue" : ""}">
       <button class="check" type="button" data-task-toggle="${task.id}" aria-label="${task.done ? "Mark as not done" : "Mark as done"}">${task.done ? "✓" : ""}</button>
-      <div class="item-main"><strong>${escapeHTML(task.title)}</strong><small>${escapeHTML(task.subject)} · ${escapeHTML(describeDue(task.due))}</small></div>
+      <div class="item-main"><strong>${escapeHTML(task.title)}</strong><small>${escapeHTML(task.subject)} · ${escapeHTML(describeDue(task.due))}${task.time ? ` · ${escapeHTML(formatTime(new Date(`2000-01-01T${task.time}`)))}` : ""}</small></div>
       <button class="icon-btn" type="button" data-task-delete="${task.id}" aria-label="Delete task">×</button>
     </div>`;
   }).join("");
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const grid = $("#calendar-grid");
+  if (!grid) return;
+  const year = ws.calendarMonth.getFullYear();
+  const month = ws.calendarMonth.getMonth();
+  $("#calendar-title").textContent = ws.calendarMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const offset = (new Date(year, month, 1).getDay() + 6) % 7;
+  const todayKey = dateKey(new Date());
+  const cells = [];
+
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(year, month, index - offset + 1);
+    const dayKey = dateKey(date);
+    const inMonth = date.getMonth() === month;
+    const personalTasks = sortTasks(ws.tasks.filter((task) => task.due === dayKey)).map((task) => ({ ...task, calendarKind: "personal" }));
+    const schoolTasks = ws.schoolAssignments
+      .filter((assignment) => assignment.due_at && dateKey(new Date(assignment.due_at)) === dayKey)
+      .map((assignment) => {
+        const due = new Date(assignment.due_at);
+        return {
+          title: assignment.title,
+          subject: assignment.subject,
+          time: `${String(due.getHours()).padStart(2, "0")}:${String(due.getMinutes()).padStart(2, "0")}`,
+          calendarKind: "school"
+        };
+      });
+    const tasks = [...personalTasks, ...schoolTasks].sort((first, second) =>
+      (first.time || "99:99").localeCompare(second.time || "99:99")
+    );
+    const events = tasks.slice(0, 2).map((task) =>
+      `<span class="calendar-event${task.done ? " is-done" : ""}${task.calendarKind === "school" ? " is-school" : ""}">${task.time ? `${escapeHTML(formatTime(new Date(`2000-01-01T${task.time}`)))} ` : ""}${escapeHTML(task.subject)}: ${escapeHTML(task.title)}</span>`
+    ).join("");
+    const remaining = tasks.length > 2 ? `<span class="calendar-more">+${tasks.length - 2} more</span>` : "";
+    cells.push(`<button type="button" class="calendar-day${inMonth ? "" : " is-outside"}${dayKey === todayKey ? " is-today" : ""}${dayKey === ws.calendarSelected ? " is-selected" : ""}" data-calendar-day="${dayKey}" aria-label="${date.toLocaleDateString()}${tasks.length ? `, ${tasks.length} planned items` : ""}">
+      <span class="calendar-day-number">${date.getDate()}</span>${events}${remaining}
+    </button>`);
+  }
+  grid.innerHTML = cells.join("");
+  const selectedTasks = ws.tasks.filter((task) => task.due === ws.calendarSelected);
+  const selectedSchool = ws.schoolAssignments.filter((assignment) =>
+    assignment.due_at && dateKey(new Date(assignment.due_at)) === ws.calendarSelected
+  );
+  const selectedDate = new Date(`${ws.calendarSelected}T12:00:00`);
+  const selectedCount = selectedTasks.length + selectedSchool.length;
+  const schoolDetails = selectedSchool.map((assignment) => {
+    const due = new Date(assignment.due_at);
+    return `${assignment.subject} ${formatTime(due)}: ${assignment.title}`;
+  });
+  $("#calendar-selection").textContent = selectedCount
+    ? `${selectedDate.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}: ${selectedCount} planned ${selectedCount === 1 ? "item" : "items"}${schoolDetails.length ? ` · Homework: ${schoolDetails.join("; ")}` : ""}.`
+    : `${selectedDate.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}: no homework planned.`;
+}
+
+export function setSchoolCalendarEvents(assignments) {
+  ws.schoolAssignments = Array.isArray(assignments) ? assignments : [];
+  renderCalendar();
 }
 
 function sessionDay(date) {
@@ -584,6 +649,7 @@ function bindOnce() {
   if (ws.bound) return;
   ws.bound = true;
   initInsights();
+  initCalculator();
 
   $$("[data-tab]").forEach((tab) => tab.addEventListener("click", () => activateTab(tab.dataset.tab)));
 
@@ -598,13 +664,45 @@ function bindOnce() {
         title,
         subject: form.elements.subject.value,
         due: form.elements.due.value || "",
+        time: form.elements.time.value || "",
         done: false,
         createdAt: serverTimestamp()
       });
       form.elements.title.value = "";
       form.elements.due.value = "";
+      form.elements.time.value = "";
       form.elements.title.focus();
     }, event.submitter);
+  });
+
+  $("#calendar-grid").addEventListener("click", (event) => {
+    const day = event.target.closest("[data-calendar-day]");
+    if (!day) return;
+    ws.calendarSelected = day.dataset.calendarDay;
+    const selected = new Date(`${ws.calendarSelected}T12:00:00`);
+    ws.calendarMonth = new Date(selected.getFullYear(), selected.getMonth(), 1);
+    $("#task-form").elements.due.value = ws.calendarSelected;
+    renderCalendar();
+    $("#task-form").elements.title.focus();
+  });
+  $("#calendar-prev").addEventListener("click", () => {
+    ws.calendarMonth = new Date(ws.calendarMonth.getFullYear(), ws.calendarMonth.getMonth() - 1, 1);
+    ws.calendarSelected = dateKey(ws.calendarMonth);
+    $("#task-form").elements.due.value = ws.calendarSelected;
+    renderCalendar();
+  });
+  $("#calendar-next").addEventListener("click", () => {
+    ws.calendarMonth = new Date(ws.calendarMonth.getFullYear(), ws.calendarMonth.getMonth() + 1, 1);
+    ws.calendarSelected = dateKey(ws.calendarMonth);
+    $("#task-form").elements.due.value = ws.calendarSelected;
+    renderCalendar();
+  });
+  $("#calendar-today").addEventListener("click", () => {
+    const today = new Date();
+    ws.calendarMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    ws.calendarSelected = dateKey(today);
+    $("#task-form").elements.due.value = ws.calendarSelected;
+    renderCalendar();
   });
 
   $("#task-list").addEventListener("click", (event) => {
@@ -833,6 +931,10 @@ function bindOnce() {
       });
     });
   });
+}
+
+export function initWorkspaceUI() {
+  bindOnce();
 }
 
 export function startWorkspace() {

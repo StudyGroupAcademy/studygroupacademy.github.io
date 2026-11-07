@@ -1,40 +1,19 @@
-import {
-  createUserWithEmailAndPassword,
-  GoogleAuthProvider,
-  getRedirectResult,
-  onAuthStateChanged,
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-  signInWithPopup,
-  signInWithRedirect
-} from "https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js";
-import { serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
-import { $, $$, auth, db, getErrorMessage, setFormError, showBanner, showToast } from "./core.js";
-import { cleanNickname, validNickname } from "./helpers.js";
+import { authClient } from "./auth-client.js";
+import { $, $$, db, getErrorMessage, setFormError, showBanner, showToast } from "./core.js";
+import { doc, serverTimestamp, setDoc } from "./firestore-client.js";
+import { cleanNickname, consumeOAuthCallback, describeOAuthError, validNickname } from "./helpers.js";
 import { initLeaderboard, loadLeaderboard } from "./leaderboard.js";
 import { initResourceFilter } from "./resources.js";
-import { ensureUserProfile, leaderboardReference, NICKNAME_RULE, profileReference } from "./session.js";
+import { schoolRequest } from "./school-client.js";
 
 const authDialog = $("#auth-dialog");
 const authForm = $("#auth-form");
+const authAccount = $("#auth-account");
+const homeworkForm = $("#homework-form");
+const schoolApplicationDialog = $("#school-application-dialog");
+const schoolApplicationForm = $("#school-application-form");
 
 let authMode = "signup";
-let registrationInProgress = false;
-let redirecting = false;
-
-const providerFactories = {
-  google() {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: "select_account" });
-    return provider;
-  }
-};
-
-function goToDashboard() {
-  if (redirecting) return;
-  redirecting = true;
-  window.location.replace("dashboard/");
-}
 
 function setAuthMode(mode) {
   authMode = mode;
@@ -43,56 +22,35 @@ function setAuthMode(mode) {
   setFormError($("#auth-error"), "");
   $("#auth-title").textContent = signingUp ? "Find your people." : "Welcome back.";
   $("#auth-intro").textContent = signingUp
-    ? "Create your free account and make yourself at home."
+    ? new URLSearchParams(window.location.search).has("invite")
+      ? "Create or log in to the account invited by your school."
+      : "Create your personal StudyGroup learner account."
     : "Log in to your free StudyGroup account.";
-  $("#nickname-field").hidden = !signingUp;
-  $("#leaderboard-optin-field").hidden = !signingUp;
-  authForm.elements.nickname.required = signingUp;
-  authForm.elements.nickname.disabled = !signingUp;
   authForm.elements.password.autocomplete = signingUp ? "new-password" : "current-password";
   $("#auth-submit").innerHTML = signingUp
     ? "Create my free account <span>→</span>"
     : "Log in to StudyGroup <span>→</span>";
   $("#auth-switch-copy").textContent = signingUp ? "Already have an account?" : "New to StudyGroup?";
   $("#auth-switch").textContent = signingUp ? "Log in" : "Join for free";
+  $("#auth-google-label").textContent = signingUp ? "Continue with Google" : "Sign in with Google";
   $("#forgot-password").hidden = signingUp;
-  $$("[data-provider]").forEach((button) => {
-    button.querySelector(".social-label").textContent = `${signingUp ? "Sign up" : "Log in"} with Google`;
-  });
-}
-
-function setSocialBusy(busy) {
-  $$("[data-provider]").forEach((button) => {
-    button.disabled = busy;
-  });
 }
 
 async function socialSignIn(providerName) {
   const errorContainer = $("#auth-error");
   setFormError(errorContainer, "");
-  setSocialBusy(true);
-  const provider = providerFactories[providerName]();
   try {
-    await signInWithPopup(auth, provider);
+    const callbackURL = new URL("dashboard/", document.baseURI);
+    const invite = new URLSearchParams(window.location.search).get("invite");
+    if (invite) callbackURL.searchParams.set("invite", invite);
+    const result = await authClient.signIn.social({
+      provider: providerName,
+      callbackURL: callbackURL.toString()
+    });
+    if (result.error) throw result.error;
   } catch (error) {
-    if (error.code === "auth/popup-closed-by-user" || error.code === "auth/cancelled-popup-request") {
-      setFormError(errorContainer, "The Google window closed before sign-in finished. Try again and let it close by itself. If it keeps happening, check that this site's address is listed under Authentication, Settings, Authorized domains in the Firebase console.");
-      return;
-    }
-    if (error.code === "auth/popup-blocked" || error.code === "auth/operation-not-supported-in-this-environment") {
-      try {
-        await signInWithRedirect(auth, provider);
-        return;
-      } catch (redirectError) {
-        console.error("StudyGroup redirect sign-in failed.", redirectError);
-        setFormError(errorContainer, getErrorMessage(redirectError));
-        return;
-      }
-    }
     console.error(`StudyGroup ${providerName} sign-in failed.`, error);
-    setFormError(errorContainer, getErrorMessage(error));
-  } finally {
-    setSocialBusy(false);
+    setFormError(errorContainer, error.message || "Sign-in could not be completed. Please try again.");
   }
 }
 
@@ -129,54 +87,53 @@ authForm.addEventListener("submit", async (event) => {
   const errorContainer = $("#auth-error");
   setFormError(errorContainer, "");
   submitButton.disabled = true;
-  submitButton.textContent = authMode === "signup" ? "Making your study space…" : "Signing you in…";
+  submitButton.textContent = authMode === "signup" ? "Creating your account…" : "Signing you in…";
 
+  let accountCreated = false;
+  const inviteToken = new URLSearchParams(window.location.search).get("invite");
   try {
-    if (authMode === "signin") {
-      await signInWithEmailAndPassword(auth, email, password);
+    let displayName = "";
+    const callbackURL = new URL("dashboard/", document.baseURI);
+    if (inviteToken) callbackURL.searchParams.set("invite", inviteToken);
+    if (authMode === "signup") {
+      displayName = cleanNickname(email.split("@")[0]).replace(/[^A-Za-z0-9 _.-]/g, "").slice(0, 24) || "Learner";
+      const result = await authClient.signUp.email({ name: displayName, email, password, callbackURL: callbackURL.toString() });
+      if (result.error) throw result.error;
+      accountCreated = true;
     } else {
-      const displayName = cleanNickname(String(values.get("nickname") || ""));
-      if (!validNickname(displayName)) {
-        setFormError(errorContainer, NICKNAME_RULE);
-        return;
-      }
-      registrationInProgress = true;
-      const credential = await createUserWithEmailAndPassword(auth, email, password);
-      const optIn = values.get("leaderboardOptIn") === "on";
-      const batch = writeBatch(db);
-      batch.set(profileReference(credential.user), {
+      const result = await authClient.signIn.email({ email, password });
+      if (result.error) throw result.error;
+    }
+    const session = await refreshAuthState();
+    if (authMode === "signup" && session?.user?.id) {
+      await setDoc(doc(db, "users", session.user.id), {
         displayName,
-        leaderboardOptIn: optIn,
+        nickname: displayName,
+        handle: `${displayName.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 15) || "learner"}_${session.user.id.slice(-4)}`,
+        bio: "",
+        badge: "Learner",
+        boards: {},
+        onboardingComplete: false,
+        leaderboardOptIn: false,
         createdAt: serverTimestamp()
       });
-      if (optIn) {
-        batch.set(leaderboardReference(credential.user.uid), {
-          displayName,
-          points: 0,
-          lastPointAt: null,
-          joinedAt: serverTimestamp()
-        });
+      try {
+        sessionStorage.setItem("studygroup-welcome", "1");
+      } catch (storageError) {
+        console.error("The profile setup reminder could not be stored.", storageError);
       }
-      await batch.commit();
-      registrationInProgress = false;
-      goToDashboard();
     }
+    if (!session?.user?.id) throw new Error("Your sign-in finished without an active session.");
+    window.location.assign(callbackURL.toString());
   } catch (error) {
     console.error(`StudyGroup ${authMode} failed.`, error);
-    registrationInProgress = false;
-    if (authMode === "signup" && auth.currentUser) {
-      try {
-        await ensureUserProfile(auth.currentUser);
-        goToDashboard();
-        return;
-      } catch (profileError) {
-        console.error("The account was created but the StudyGroup profile could not be saved.", profileError);
-        setFormError(errorContainer, `Your account was created, but the StudyGroup profile could not be saved. ${getErrorMessage(profileError)}`);
-      }
-    }
-    if (!errorContainer.textContent) setFormError(errorContainer, getErrorMessage(error));
+    setFormError(
+      errorContainer,
+      accountCreated
+        ? "Your account was created, but we couldn't finish saving your profile. Log in with your new account to continue."
+        : error.message || getErrorMessage(error)
+    );
   } finally {
-    registrationInProgress = false;
     submitButton.disabled = false;
     submitButton.innerHTML = authMode === "signup"
       ? "Create my free account <span>→</span>"
@@ -193,37 +150,161 @@ $("#forgot-password").addEventListener("click", async () => {
     return;
   }
   try {
-    await sendPasswordResetEmail(auth, email);
+    const result = await authClient.requestPasswordReset({
+      email,
+      redirectTo: `${window.location.origin}${window.location.pathname}`
+    });
+    if (result.error) throw result.error;
     setFormError(errorContainer, "");
-    showToast("If an account exists for that email, a password reset link is on its way.");
+    showToast("If an account exists for that email, a password reset message is on its way.");
   } catch (error) {
     console.error("StudyGroup password reset failed.", error);
-    setFormError(errorContainer, getErrorMessage(error));
+    setFormError(errorContainer, error.message || getErrorMessage(error));
   }
 });
 
 initResourceFilter();
 initLeaderboard();
 
-if (window.location.protocol === "file:") {
-  showBanner("Open StudyGroup through Firebase Hosting or a local web server. Sign-in does not work from a file.", true);
-}
+$("#open-school-application").addEventListener("click", () => {
+  schoolApplicationForm.reset();
+  setFormError($("#school-application-error"), "");
+  schoolApplicationDialog.showModal();
+});
 
-onAuthStateChanged(auth, async (user) => {
-  if (registrationInProgress || !user) return;
+schoolApplicationForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("#school-application-submit");
+  const error = $("#school-application-error");
+  const result = $("#school-application-result");
+  setFormError(error, "");
+  button.disabled = true;
+  button.textContent = "Sending application…";
   try {
-    await ensureUserProfile(user);
-    goToDashboard();
-  } catch (error) {
-    console.error("Could not load the student's private StudyGroup profile.", error);
-    setFormError($("#auth-error"), getErrorMessage(error));
-    showBanner(getErrorMessage(error), true);
+    await schoolRequest("apply", Object.fromEntries(new FormData(schoolApplicationForm).entries()), { anonymous: true });
+    schoolApplicationDialog.close();
+    schoolApplicationForm.reset();
+    result.textContent = "Application sent. The StudyGroup administrator will review your school details.";
+  } catch (caught) {
+    console.error("Could not submit the school application.", caught);
+    setFormError(error, caught.message || "The school application could not be submitted.");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Send application";
   }
 });
 
-getRedirectResult(auth).catch((error) => {
-  console.error("StudyGroup redirect sign-in failed.", error);
-  showBanner(getErrorMessage(error), true);
+const authCallback = consumeOAuthCallback();
+if (authCallback.error) {
+  setAuthMode("signin");
+  setFormError($("#auth-error"), describeOAuthError(authCallback.error));
+  authDialog.showModal();
+}
+
+if (window.location.protocol === "file:") {
+  showBanner("Open StudyGroup through a web server. Sign-in does not work from a file.", true);
+}
+
+function renderAuthState(user) {
+  authAccount.hidden = !user;
+  $$("[data-open-auth]").forEach((button) => {
+    button.hidden = Boolean(user);
+  });
+  $("#auth-account-name").textContent = user?.name || user?.email || "";
+  $("#auth-dashboard-link").hidden = !user;
+}
+
+async function refreshAuthState() {
+  const result = await authClient.getSession();
+  if (result.error) throw result.error;
+  renderAuthState(result.data?.user || null);
+  return result.data?.session || null;
+}
+
+$("#auth-sign-out").addEventListener("click", async () => {
+  try {
+    const result = await authClient.signOut();
+    if (result.error) throw result.error;
+    renderAuthState(null);
+    showToast("You have been signed out.");
+  } catch (error) {
+    console.error("Could not sign out of StudyGroup.", error);
+    showToast(error.message || "Sign-out could not be completed.");
+  }
+});
+
+async function uploadHomework(file) {
+  const sessionResult = await authClient.getSession();
+  if (sessionResult.error) throw sessionResult.error;
+  const token = sessionResult.data?.session?.token;
+  if (!token) throw new Error("Your sign-in session could not be confirmed. Please sign out and log in again.");
+
+  const signatureResponse = await fetch("https://studygroupacademy-github-io.onrender.com/api/cloudinary/signature", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const signatureResult = await signatureResponse.json();
+  if (!signatureResponse.ok) {
+    throw new Error(signatureResult.error || "The secure upload service could not authorize this file.");
+  }
+
+  const uploadData = new FormData();
+  uploadData.append("file", file);
+  uploadData.append("api_key", signatureResult.apiKey);
+  uploadData.append("signature", signatureResult.signature);
+  for (const [key, value] of Object.entries(signatureResult.params)) {
+    uploadData.append(key, String(value));
+  }
+
+  const uploadResponse = await fetch(
+    `https://api.cloudinary.com/v1_1/${encodeURIComponent(signatureResult.cloudName)}/${signatureResult.resourceType}/upload`,
+    { method: "POST", body: uploadData }
+  );
+  const uploadResult = await uploadResponse.json();
+  if (!uploadResponse.ok) {
+    throw new Error(uploadResult.error?.message || "Cloudinary could not store this file.");
+  }
+}
+
+if (homeworkForm) homeworkForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const file = homeworkForm.elements.file.files[0];
+  const status = $("#homework-upload-status");
+  const button = $("#homework-upload-submit");
+  if (!file) {
+    status.textContent = "Choose a file first.";
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    status.textContent = "Files must be 10 MB or smaller.";
+    return;
+  }
+
+  button.disabled = true;
+  status.textContent = "Uploading securely…";
+  try {
+    await uploadHomework(file);
+    homeworkForm.reset();
+    status.textContent = "Upload complete. The file is private in Cloudinary; assignment records and sharing are not connected yet.";
+  } catch (error) {
+    console.error("StudyGroup homework upload failed.", error);
+    status.textContent = error.message || "The file could not be uploaded.";
+  } finally {
+    button.disabled = false;
+  }
+});
+
+refreshAuthState().then((session) => {
+  if (session?.user) {
+    const dashboard = new URL("dashboard/", document.baseURI);
+    const invite = new URLSearchParams(window.location.search).get("invite");
+    if (invite) dashboard.searchParams.set("invite", invite);
+    window.location.replace(dashboard.toString());
+  }
+}).catch((error) => {
+  console.error("Could not restore the Neon Auth session.", error);
+  renderAuthState(null);
+  showBanner("We couldn't check your Neon sign-in. Please refresh the page and try again.", true);
 });
 
 loadLeaderboard();

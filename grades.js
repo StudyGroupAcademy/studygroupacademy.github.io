@@ -7,7 +7,7 @@ import {
   onSnapshot,
   query,
   serverTimestamp
-} from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
+} from "./firestore-client.js";
 import { $, db, getErrorMessage, runSafely, showBanner, showToast, state } from "./core.js";
 import { dateKey, escapeHTML, formatDay, percentOf, summariseScores } from "./helpers.js";
 import { setData } from "./insights.js";

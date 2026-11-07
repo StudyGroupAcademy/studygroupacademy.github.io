@@ -46,6 +46,31 @@ export function sanitizeNickname(value, fallback) {
   return validNickname(cleaned) ? cleaned : fallback;
 }
 
+export function consumeOAuthCallback() {
+  const url = new URL(window.location.href);
+  const error = url.searchParams.get("error");
+  const result = url.searchParams.get("oauth");
+  if (!error && !result) return { error: null, result: null };
+  url.searchParams.delete("error");
+  url.searchParams.delete("error_description");
+  url.searchParams.delete("oauth");
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  return { error, result };
+}
+
+export function describeOAuthError(code) {
+  if (code === "account_not_linked") {
+    return "This Google account has the same email as an existing StudyGroup password account. Log in with that email and password, then choose Connect Google in Edit your profile to link them safely.";
+  }
+  if (code === "linking-failed") {
+    return "Google could not be linked to this account. Make sure you're signed in to the StudyGroup account you want to keep, then try again.";
+  }
+  if (code) {
+    return "Google sign-in couldn't be completed. Please try again or log in with your StudyGroup email and password.";
+  }
+  return "";
+}
+
 export function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }

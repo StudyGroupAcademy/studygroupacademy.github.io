@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch } from "./firestore-client.js";
 import { db, state } from "./core.js";
 import { sanitizeNickname, weekStartKey } from "./helpers.js";
 
@@ -33,31 +33,60 @@ export function takeWelcomeFlag() {
   }
 }
 
+function suggestedName(user) {
+  const authName = typeof user.displayName === "string" ? user.displayName.trim() : "";
+  const emailName = typeof user.email === "string" ? user.email.split("@")[0] : "";
+  const name = authName && !/^(study buddy|student|learner)$/i.test(authName) ? authName : emailName;
+  return sanitizeNickname(name, `Learner ${user.uid.slice(0, 5)}`);
+}
+
 async function createOrLoadProfile(user) {
   const reference = profileReference(user);
   const snapshot = await getDoc(reference);
   if (!snapshot.exists()) {
-    const fallback = `Learner ${user.uid.slice(0, 5)}`;
     const newProfile = {
-      displayName: sanitizeNickname(user.displayName, fallback),
+      displayName: suggestedName(user),
+      nickname: suggestedName(user),
+      handle: `${suggestedName(user).toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 15) || "learner"}_${user.uid.slice(-4)}`,
+      bio: "",
+      badge: "Learner",
+      boards: {},
+      onboardingComplete: false,
       leaderboardOptIn: false,
       createdAt: serverTimestamp()
     };
     await setDoc(reference, newProfile);
     setWelcomeFlag();
-    return { displayName: newProfile.displayName, leaderboardOptIn: false };
+    return newProfile;
   }
-  const existing = snapshot.data();
+  let existing = snapshot.data();
+  if (!existing.displayName || /^(study buddy|student|learner)$/i.test(existing.displayName.trim())) {
+    const displayName = suggestedName(user);
+    await updateDoc(reference, { displayName });
+    existing = { ...existing, displayName };
+  }
+  const missingFields = {};
+  if (!existing.nickname) missingFields.nickname = existing.displayName;
+  if (!existing.handle) missingFields.handle = `${(existing.nickname || existing.displayName).toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 15) || "learner"}_${user.uid.slice(-4)}`;
+  if (typeof existing.bio !== "string") missingFields.bio = "";
+  if (!existing.badge) missingFields.badge = "Learner";
+  if (!existing.boards || typeof existing.boards !== "object") missingFields.boards = {};
+  if (Object.keys(missingFields).length) {
+    await updateDoc(reference, missingFields);
+    existing = { ...existing, ...missingFields };
+  }
   if (existing.leaderboardOptIn === true) {
     const publicReference = leaderboardReference(user.uid);
     const publicSnapshot = await getDoc(publicReference);
     if (!publicSnapshot.exists()) {
       await setDoc(publicReference, {
-        displayName: existing.displayName,
+        displayName: existing.nickname,
         points: 0,
         lastPointAt: null,
         joinedAt: serverTimestamp()
       });
+    } else if (publicSnapshot.data().displayName !== existing.nickname) {
+      await updateDoc(publicReference, { displayName: existing.nickname });
     }
   }
   return existing;
@@ -71,16 +100,16 @@ export function ensureUserProfile(user) {
   return inflightProfiles.get(user.uid);
 }
 
-export async function saveProfileChoices(nickname, optIn) {
+export async function saveProfileChoices(profile, optIn) {
   const publicReference = leaderboardReference(state.user.uid);
   const publicSnapshot = await getDoc(publicReference);
   const batch = writeBatch(db);
-  batch.update(profileReference(state.user), { displayName: nickname, leaderboardOptIn: optIn });
+  batch.update(profileReference(state.user), { ...profile, onboardingComplete: true, leaderboardOptIn: optIn });
   if (optIn && publicSnapshot.exists()) {
-    batch.update(publicReference, { displayName: nickname });
+    batch.update(publicReference, { displayName: profile.nickname });
   } else if (optIn) {
     batch.set(publicReference, {
-      displayName: nickname,
+      displayName: profile.nickname,
       points: 0,
       lastPointAt: null,
       joinedAt: serverTimestamp()
@@ -89,7 +118,7 @@ export async function saveProfileChoices(nickname, optIn) {
     batch.delete(publicReference);
   }
   await batch.commit();
-  state.profile = { ...state.profile, displayName: nickname, leaderboardOptIn: optIn };
+  state.profile = { ...state.profile, ...profile, onboardingComplete: true, leaderboardOptIn: optIn };
 }
 
 export async function addWeeklyMinutes(minutes) {
