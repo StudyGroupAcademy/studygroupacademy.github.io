@@ -1,5 +1,5 @@
-import { createAuthClient } from "https://esm.sh/@neon/neon-js@0.10.2/auth?bundle";
+import { createAuthClient } from "better-auth/react"; 
 
-export const authClient = createAuthClient(
-  "studygroupacademy-github-io.onrender.com"
-);
+export const authClient = createAuthClient({
+  baseURL: "studygroupacademy-github-io.onrender.com" 
+});
