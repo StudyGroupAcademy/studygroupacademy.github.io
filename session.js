@@ -28,6 +28,7 @@ export async function ensureUserProfile(user) {
     boards: {},
     leaderboardOptIn: false,
     xp: 0,
+    dailyGoal: "",
     onboardingComplete: false,
     createdAt: new Date().toISOString()
   };
@@ -64,4 +65,17 @@ export async function saveProfileChoices(profileData, optIn) {
       updatedAt: new Date().toISOString()
     }, { merge: true });
   }
+}
+
+export async function saveDailyGoal(goal) {
+  const sessionResult = await authClient.getSession();
+  const authUser = sessionResult.data?.user;
+  if (!authUser) throw new Error("No active user session found.");
+
+  const uid = authUser.id || authUser.uid;
+  const userDocRef = doc(null, "users", uid);
+  await updateDoc(userDocRef, {
+    dailyGoal: goal,
+    updatedAt: new Date().toISOString()
+  });
 }
