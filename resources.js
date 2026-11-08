@@ -205,18 +205,23 @@ export async function setLessonUser(user) {
 }
 
 export function initResourceFilter() {
+  $$("[data-resource-filter]").forEach((chip) => {
+    const filter = chip.dataset.resourceFilter;
+    if (filter !== "all" && filter !== "computer-science") {
+      chip.style.display = "none";
+    }
+    chip.addEventListener("click", () => {
+      $$("[data-resource-filter]").forEach((other) => other.classList.toggle("is-active", other === chip));
+      applyResourceFilter();
+    });
+  });
+
   const container = $("#resource-picks");
   if (container) {
     renderLessons(container);
     if (!bound) bindLessonInteractions(container);
   }
   bound = Boolean(container);
-  $$("[data-resource-filter]").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      $$("[data-resource-filter]").forEach((other) => other.classList.toggle("is-active", other === chip));
-      applyResourceFilter();
-    });
-  });
   $("#resource-search")?.addEventListener("input", applyResourceFilter);
   applyResourceFilter();
 }
