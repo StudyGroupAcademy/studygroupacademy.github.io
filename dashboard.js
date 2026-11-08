@@ -1,327 +1,1252 @@
 import { authClient } from "./auth-client.js";
-import {
-  $,
-  $$,
-  fillSubjectSelects,
-  getErrorMessage,
-  setFormError,
-  showBanner,
-  showToast,
-  state
-} from "./core.js";
-import { cleanNickname, consumeOAuthCallback, describeOAuthError, earnedNameTag, NAME_TAG_MILESTONES, validNickname } from "./helpers.js";
-import { initLeaderboard, loadLeaderboard } from "./leaderboard.js";
+import { collection, completeActivity, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where } from "./firestore-client.js";
+import { $, $$, db, state } from "./core.js";
+import { ensureUserProfile, saveDailyGoal, saveProfileChoices, takeWelcomeFlag } from "./session.js";
 import { initResourceFilter, setLessonUser } from "./resources.js";
-import { initSchoolPortal, startSchoolPortal } from "./school-portal.js";
-import {
-  ensureUserProfile,
-  NICKNAME_RULE,
-  saveProfileChoices,
-  takeWelcomeFlag
-} from "./session.js";
-import { exportData, initWorkspaceUI } from "./workspace.js";
 
-const profileDialog = $("#profile-dialog");
-const profileForm = $("#profile-form");
-const leaderboardList = $("#leaderboard-list");
+const DEFAULT_SUBJECTS = ["Maths", "English", "Science", "Computer Science", "History", "Geography", "French", "Spanish"];
 
-let loadToken = 0;
-let leaving = false;
+let currentUser = null;
+let currentTab = "overview";
+let currentTaskFilter = "all";
+let currentBoard = "xp";
+let calendarDate = new Date();
+let activeGroupCode = null;
+let activeNoteId = null;
+let timerSeconds = 25 * 60;
+let timerRunning = false;
+let timerInterval = null;
+let timerMode = "focus";
+let activeDeck = null;
+let cardIndex = 0;
+let cardShowingAnswer = false;
 
-function leaveToLanding() {
-  if (leaving) return;
-  leaving = true;
-  window.location.replace("../");
-}
+export async function initDashboard() {
+  bindNavigation();
+  bindForms();
+  bindProfileDialog();
+  bindCalculator();
+  bindTimer();
+  bindLeaderboardTabs();
+  bindNoteActions();
+  bindGroupActions();
+  bindSchoolActions();
+  
+  if (takeWelcomeFlag()) {
+    openProfileDialog(true);
+  }
 
-function revealPage() {
+  try {
+    const sessionResult = await authClient.getSession();
+    currentUser = sessionResult.data?.user || null;
+  } catch (err) {
+    currentUser = null;
+  }
+
+  if (!currentUser) {
+    document.body.classList.remove("checking");
+    renderSignedOut();
+    return;
+  }
+
   document.body.classList.remove("checking");
+  await handleSignedInUser(currentUser);
 }
 
-function renderAccount() {
-  if (!state.user) return;
-  const accountName = state.profile?.displayName || state.user.displayName || state.user.email?.split("@")[0] || "Learner";
-  const nickname = state.profile?.nickname || accountName;
-  $("#header-name").textContent = accountName;
-  $("#header-initial").textContent = accountName.slice(0, 1).toUpperCase();
-  $("#account-email").textContent = state.user.email || "";
-  $("#workspace-name").textContent = accountName;
-  $("#account-handle").textContent = `@${state.profile?.handle || nickname.toLowerCase().replace(/[^a-z0-9]+/g, "")}`;
-  renderNameTag(Number(state.profile?.xp) || 0);
-  const canCheckIn = Boolean(state.profile?.leaderboardOptIn);
-  $("#member-join").hidden = canCheckIn || !state.profile;
-  $("#member-xp").hidden = !canCheckIn;
-  $("#member-xp-value").textContent = String(Number(state.profile?.xp) || 0);
+async function handleSignedInUser(user) {
+  currentUser = user;
+  const profile = await ensureUserProfile(user);
+  renderSignedIn(profile);
+  populateSubjectDropdowns();
+  setLessonUser(user);
+  initResourceFilter();
+  await loadAllPanelData();
+  startRealtimeListeners();
 }
 
-function renderNameTag(xp) {
-  const tag = earnedNameTag(xp);
-  for (const selector of ["#header-name-tag", "#workspace-name-tag"]) {
-    const element = $(selector);
-    element.textContent = tag ? `[${tag.tag}]` : "";
-    element.hidden = !tag;
+function renderSignedIn(profile) {
+  const name = profile.nickname || profile.displayName || "Learner";
+  const initial = name.charAt(0).toUpperCase();
+  
+  const headerName = $("#header-name");
+  if (headerName) headerName.textContent = name;
+  const headerInitial = $("#header-initial");
+  if (headerInitial) headerInitial.textContent = initial;
+  const workspaceName = $("#workspace-name");
+  if (workspaceName) workspaceName.textContent = name;
+  const emailElem = $("#account-email");
+  if (emailElem) emailElem.textContent = currentUser?.email || "";
+  const handleElem = $("#account-handle");
+  if (handleElem) handleElem.textContent = `@${profile.handle || "user"}`;
+  
+  const tagElem = $("#workspace-name-tag");
+  if (tagElem) {
+    tagElem.hidden = !profile.leaderboardOptIn;
+    tagElem.textContent = "✳";
   }
-  const accountTag = $("#account-badge");
-  accountTag.textContent = tag ? `Earned name tag · ${tag.tag}` : `Next name tag at ${NAME_TAG_MILESTONES[0].xp} XP`;
-  renderAchievements(xp);
+
+  const memberXpVal = $("#member-xp-value");
+  if (memberXpVal) memberXpVal.textContent = profile.xp || 0;
+  const memberJoin = $("#member-join");
+  if (memberJoin) memberJoin.hidden = Boolean(profile.leaderboardOptIn);
+  const memberXp = $("#member-xp");
+  if (memberXp) memberXp.hidden = !profile.leaderboardOptIn;
 }
 
-function renderAchievements(xp) {
-  $("#badge-summary").textContent = `${xp} XP earned · Name tags unlock through lessons and worksheet achievements.`;
-  $("#badge-grid").innerHTML = NAME_TAG_MILESTONES.map((milestone) => {
-    const unlocked = xp >= milestone.xp;
-    return `<article class="badge${unlocked ? " is-unlocked" : ""}">
-      <span class="badge-icon">${unlocked ? "✦" : "◇"}</span>
-      <strong>${milestone.tag}</strong>
-      <small>${milestone.description}</small>
-      <em>${unlocked ? "Unlocked · shown next to your name" : `${milestone.xp - xp} XP to unlock`}</em>
-    </article>`;
-  }).join("");
+function renderSignedOut() {
+  const headerName = $("#header-name");
+  if (headerName) headerName.textContent = "Sign in";
+  const workspaceName = $("#workspace-name");
+  if (workspaceName) workspaceName.textContent = "Learner";
+  const emailElem = $("#account-email");
+  if (emailElem) emailElem.textContent = "Not signed in";
+  const handleElem = $("#account-handle");
+  if (handleElem) handleElem.textContent = "Sign in to save progress";
 }
 
-function openProfileDialog(welcome = false) {
-  profileDialog.dataset.onboarding = String(welcome);
-  profileDialog.querySelector("[data-close-dialog]").hidden = welcome;
-  $("#account-popover").hidden = true;
-  profileForm.elements.displayName.value = state.profile?.displayName || state.user?.displayName || "";
-  profileForm.elements.nickname.value = state.profile?.nickname || state.profile?.displayName || "";
-  profileForm.elements.handle.value = state.profile?.handle || "";
-  profileForm.elements.bio.value = state.profile?.bio || "";
-  const boards = state.profile?.boards || {};
-  for (const subject of ["maths", "english-language", "english-literature", "biology", "chemistry", "physics", "history", "geography", "computer-science", "french", "spanish"]) {
-    profileForm.elements[`board-${subject}`].value = boards[subject] || "";
-  }
-  profileForm.elements.leaderboardOptIn.checked = Boolean(state.profile?.leaderboardOptIn);
-  $("#profile-title").textContent = welcome ? "Finish your profile." : "Profile & account settings.";
-  $("#profile-intro").textContent = welcome
-    ? "Add your name, nickname, profile details and exam boards. Your email stays private."
-    : "Your account name is for your dashboard; your nickname is shown publicly only if you opt in.";
-  setFormError($("#profile-error"), "");
-  if (!profileDialog.open) profileDialog.showModal();
-}
-
-let lastBoardLoad = 0;
-
-async function refreshBoard() {
-  lastBoardLoad = Date.now();
-  await loadLeaderboard();
-}
-
-async function loadUser(user) {
-  const token = ++loadToken;
-  const uid = user?.uid || user?.id;
-  if (!uid) {
-    revealPage();
-    showBanner("The signed-in account is missing its user ID. Please log in again.", true);
-    return;
-  }
-  const account = user.uid === uid ? user : { ...user, uid };
-  state.user = account;
-  state.profile = null;
-  try {
-    const profile = await ensureUserProfile(account);
-    if (token !== loadToken) return;
-    state.profile = profile;
-    renderAccount();
-    void setLessonUser(account);
-    revealPage();
-    initWorkspaceUI();
-    void startSchoolPortal(account, profile);
-    await refreshBoard();
-    showBanner(`Welcome${profile.displayName ? `, ${profile.displayName}` : ""}. Your account is ready.`);
-    const url = new URL(window.location.href);
-    const welcomeFlag = takeWelcomeFlag();
-    const needsProfileSetup = profile.onboardingComplete === false || welcomeFlag;
-    const editProfile = url.searchParams.get("settings") === "profile";
-    if (needsProfileSetup || editProfile) {
-      url.searchParams.delete("settings");
-      window.history.replaceState({}, "", url.toString());
-      openProfileDialog(needsProfileSetup);
-    }
-  } catch (error) {
-    console.error("Could not load the student's private StudyGroup profile.", error);
-    revealPage();
-    showBanner(getErrorMessage(error), true);
-  }
-}
-
-async function downloadMyData() {
-  if (!state.user) return;
-  $("#account-popover").hidden = true;
-  try {
-    const data = await exportData();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "studygroup-my-data.json";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(link.href), 2000);
-    showToast("Your data has been downloaded.");
-  } catch (error) {
-    console.error("Could not export the student's StudyGroup data.", error);
-    showToast(getErrorMessage(error));
-  }
-}
-
-$$("[data-close-dialog]").forEach((button) => {
-  button.addEventListener("click", () => button.closest("dialog").close());
-});
-
-$$("dialog").forEach((dialog) => {
-  dialog.addEventListener("click", (event) => {
-    if (event.target === dialog && !(dialog === profileDialog && dialog.dataset.onboarding === "true")) dialog.close();
-  });
-});
-profileDialog.addEventListener("cancel", (event) => {
-  if (profileDialog.dataset.onboarding === "true") event.preventDefault();
-});
-
-$("#account-toggle").addEventListener("click", () => {
-  const popover = $("#account-popover");
-  const open = popover.hidden;
-  popover.hidden = !open;
-  $("#account-toggle").setAttribute("aria-expanded", String(open));
-});
-
-document.addEventListener("click", (event) => {
-  const popover = $("#account-popover");
-  if (!popover.hidden && !event.target.closest("#signed-in-menu")) {
-    popover.hidden = true;
-    $("#account-toggle").setAttribute("aria-expanded", "false");
-  }
-});
-
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") $("#account-popover").hidden = true;
-});
-
-$$("[data-open-settings]").forEach((button) => {
-  button.addEventListener("click", () => openProfileDialog(false));
-});
-
-$("#download-data").addEventListener("click", downloadMyData);
-
-profileForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!state.user) return;
-  const formValues = new FormData(profileForm);
-  const nickname = cleanNickname(String(formValues.get("nickname") || ""));
-  const displayName = cleanNickname(String(formValues.get("displayName") || ""));
-  const handle = String(formValues.get("handle") || "").trim().replace(/^@/, "");
-  const bio = String(formValues.get("bio") || "").trim();
-  const boards = Object.fromEntries(["maths", "english-language", "english-literature", "biology", "chemistry", "physics", "history", "geography", "computer-science", "french", "spanish"]
-    .map((subject) => [subject, String(formValues.get(`board-${subject}`) || "")]).filter(([, board]) => board));
-  const optIn = profileForm.elements.leaderboardOptIn.checked;
-  const errorContainer = $("#profile-error");
-  const submitButton = profileForm.querySelector("[type=submit]");
-  setFormError(errorContainer, "");
-  if (!validNickname(nickname) || displayName.length < 2 || !/^[A-Za-z0-9_]{3,20}$/.test(handle)) {
-    setFormError(errorContainer, !validNickname(nickname) ? NICKNAME_RULE : "Enter an account name (at least 2 characters) and a handle with 3–20 letters, numbers or underscores.");
-    return;
-  }
-  submitButton.disabled = true;
-  submitButton.textContent = "Saving your preferences…";
-  try {
-    await saveProfileChoices({ displayName, nickname, handle, bio, boards }, optIn);
-    renderAccount();
-    profileDialog.dataset.onboarding = "false";
-    profileDialog.querySelector("[data-close-dialog]").hidden = false;
-    profileDialog.close();
-    await refreshBoard();
-    showToast(optIn ? "Your nickname is on the study leaderboard." : "Your profile is private from the leaderboard.");
-  } catch (error) {
-    console.error("Could not update the student's StudyGroup profile.", error);
-    setFormError(errorContainer, getErrorMessage(error));
-  } finally {
-    submitButton.disabled = false;
-    submitButton.innerHTML = "Save my preferences <span>→</span>";
-  }
-});
-
-$("#link-google").addEventListener("click", async (event) => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  setFormError($("#profile-error"), "");
-  try {
-    const callbackBase = `${window.location.origin}${window.location.pathname}`;
-    const result = await authClient.signIn.social({
-      provider: "google",
-      callbackURL: `${callbackBase}?oauth=google-linked`,
-      errorCallbackURL: `${callbackBase}?error=linking-failed`
+function bindNavigation() {
+  $$(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const targetTab = tab.dataset.tab;
+      if (!targetTab) return;
+      switchTab(targetTab);
     });
-    if (result.error) throw result.error;
-    if (!result.data?.url) throw new Error("Neon Auth did not return a Google authorization URL.");
-    window.location.assign(result.data.url);
-  } catch (error) {
-    console.error("Could not sign in with Google.", error);
-    setFormError($("#profile-error"), error.message || getErrorMessage(error));
-    button.disabled = false;
-  }
-});
+  });
 
-$("#sign-out").addEventListener("click", async () => {
+  const accountToggle = $("#account-toggle");
+  const popover = $("#account-popover");
+  if (accountToggle && popover) {
+    accountToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const isHidden = popover.hidden;
+      popover.hidden = !isHidden;
+      accountToggle.setAttribute("aria-expanded", String(isHidden));
+    });
+    document.addEventListener("click", () => {
+      popover.hidden = true;
+      accountToggle.setAttribute("aria-expanded", "false");
+    });
+    popover.addEventListener("click", (e) => e.stopPropagation());
+  }
+
+  $$("[data-open-settings]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      $("#account-popover").hidden = true;
+      openProfileDialog(false);
+    });
+  });
+
+  const signOutBtn = $("#sign-out");
+  if (signOutBtn) {
+    signOutBtn.addEventListener("click", async () => {
+      await authClient.signOut();
+      window.location.href = "./";
+    });
+  }
+
+  const downloadBtn = $("#download-data");
+  if (downloadBtn) {
+    downloadBtn.addEventListener("click", downloadUserData);
+  }
+}
+
+function switchTab(tabName) {
+  currentTab = tabName;
+  $$(".tab").forEach((tab) => {
+    const active = tab.dataset.tab === tabName;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-selected", String(active));
+  });
+  $$(".panel").forEach((panel) => {
+    panel.hidden = panel.dataset.panel !== tabName;
+  });
+  window.location.hash = tabName;
+}
+
+function bindForms() {
+  const taskForm = $("#task-form");
+  if (taskForm) {
+    taskForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+      const data = new FormData(taskForm);
+      const title = data.get("title").trim();
+      const subject = data.get("subject");
+      const due = data.get("due");
+      const time = data.get("time");
+      if (!title) return;
+
+      try {
+        await setDoc(doc(collection(db, "users", currentUser.uid, "tasks")), {
+          title,
+          subject,
+          due: due || null,
+          time: time || null,
+          completed: false,
+          createdAt: new Date().toISOString()
+        });
+        taskForm.reset();
+        await loadTasks();
+      } catch (err) {
+        console.error("Failed to add task:", err);
+      }
+    });
+  }
+
+  const examForm = $("#exam-form");
+  if (examForm) {
+    examForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+      const data = new FormData(examForm);
+      const name = data.get("name").trim();
+      const subject = data.get("subject");
+      const examDate = data.get("examDate");
+      if (!name || !examDate) return;
+
+      try {
+        await setDoc(doc(collection(db, "users", currentUser.uid, "exams")), {
+          name,
+          subject,
+          examDate,
+          createdAt: new Date().toISOString()
+        });
+        examForm.reset();
+        await loadExams();
+      } catch (err) {
+        console.error("Failed to add exam:", err);
+      }
+    });
+  }
+
+  const scoreForm = $("#score-form");
+  if (scoreForm) {
+    scoreForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+      const data = new FormData(scoreForm);
+      const name = data.get("name").trim();
+      const subject = data.get("subject");
+      const score = Number(data.get("score"));
+      const outOf = Number(data.get("outOf"));
+      const takenOn = data.get("takenOn");
+      if (!name || isNaN(score) || isNaN(outOf)) return;
+
+      try {
+        await setDoc(doc(collection(db, "users", currentUser.uid, "grades")), {
+          name,
+          subject,
+          score,
+          outOf,
+          takenOn,
+          createdAt: new Date().toISOString()
+        });
+        scoreForm.reset();
+        await loadGrades();
+      } catch (err) {
+        console.error("Failed to log grade:", err);
+      }
+    });
+  }
+
+  const deckForm = $("#deck-form");
+  if (deckForm) {
+    deckForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+      const data = new FormData(deckForm);
+      const name = data.get("name").trim();
+      const subject = data.get("subject");
+      const rawCards = data.get("cards");
+      if (!name || !rawCards) return;
+
+      const cardLines = rawCards.split("\n").map(l => l.trim()).filter(Boolean);
+      const parsedCards = cardLines.map(line => {
+        const [q, a] = line.split("|").map(s => s?.trim());
+        return { question: q || "", answer: a || "" };
+      }).filter(c => c.question && c.answer);
+
+      if (!parsedCards.length) return;
+
+      try {
+        await setDoc(doc(collection(db, "users", currentUser.uid, "decks")), {
+          name,
+          subject,
+          cards: parsedCards,
+          createdAt: new Date().toISOString()
+        });
+        deckForm.reset();
+        await loadDecks();
+      } catch (err) {
+        console.error("Failed to save deck:", err);
+      }
+    });
+  }
+}
+
+function bindProfileDialog() {
+  const dialog = $("#profile-dialog");
+  const form = $("#profile-form");
+  if (!dialog || !form) return;
+
+  const closeBtn = dialog.querySelector("[data-close-dialog]");
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => dialog.close());
+  }
+
+  const linkGoogleBtn = $("#link-google");
+  if (linkGoogleBtn) {
+    linkGoogleBtn.addEventListener("click", async () => {
+      try {
+        const callbackBase = `${window.location.origin}${window.location.pathname}`;
+        await authClient.signIn.social({
+          provider: "google",
+          callbackURL: `${callbackBase}?oauth=google-linked`,
+          errorCallbackURL: `${callbackBase}?error=linking-failed`
+        });
+      } catch (err) {
+        const errBox = $("#profile-error");
+        if (errBox) {
+          errBox.hidden = false;
+          errBox.textContent = err.message || "Failed to link Google account.";
+        }
+      }
+    });
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    const data = new FormData(form);
+    const nickname = data.get("nickname").trim();
+    const displayName = data.get("displayName").trim();
+    const handle = data.get("handle").trim().toLowerCase();
+    const bio = data.get("bio").trim();
+    const optIn = data.get("leaderboardOptIn") === "on";
+
+    const boards = {};
+    DEFAULT_SUBJECTS.forEach((sub) => {
+      const key = `board-${sub.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
+      const val = data.get(key);
+      if (val) boards[sub] = val;
+    });
+
+    const errBox = $("#profile-error");
+    try {
+      if (errBox) errBox.hidden = true;
+      await saveProfileChoices({ nickname, displayName, handle, bio, boards }, optIn);
+      dialog.close();
+      const snapshot = await getDoc(doc(null, "users", currentUser.uid));
+      if (snapshot.exists()) {
+        renderSignedIn(snapshot.data());
+      }
+    } catch (err) {
+      if (errBox) {
+        errBox.hidden = false;
+        errBox.textContent = err.message || "Failed to save preferences.";
+      }
+    }
+  });
+}
+
+async function openProfileDialog(isWelcome) {
+  const dialog = $("#profile-dialog");
+  const form = $("#profile-form");
+  if (!dialog || !form || !currentUser) return;
+
+  const intro = $("#profile-intro");
+  if (intro) {
+    intro.textContent = isWelcome ? "Welcome! Set your preferences to get started." : "Update your profile and exam boards.";
+  }
+
   try {
-    const result = await authClient.signOut();
-    if (result.error) throw result.error;
-    leaveToLanding();
-  } catch (error) {
-    console.error("Could not sign out of StudyGroup.", error);
-    showToast(getErrorMessage(error));
+    const snap = await getDoc(doc(null, "users", currentUser.uid));
+    if (snap.exists()) {
+      const data = snap.data();
+      if (form.elements["nickname"]) form.elements["nickname"].value = data.nickname || "";
+      if (form.elements["displayName"]) form.elements["displayName"].value = data.displayName || "";
+      if (form.elements["handle"]) form.elements["handle"].value = data.handle || "";
+      if (form.elements["bio"]) form.elements["bio"].value = data.bio || "";
+      if (form.elements["leaderboardOptIn"]) form.elements["leaderboardOptIn"].checked = Boolean(data.leaderboardOptIn);
+
+      DEFAULT_SUBJECTS.forEach((sub) => {
+        const key = `board-${sub.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
+        if (form.elements[key]) {
+          form.elements[key].value = data.boards?.[sub] || "";
+        }
+      });
+    }
+  } catch (err) {
+    console.error("Failed to load user profile for dialog:", err);
   }
-});
 
-$("#member-join").addEventListener("click", () => {
-  openProfileDialog(false);
-  profileForm.elements.leaderboardOptIn.checked = true;
-});
+  dialog.showModal();
+}
 
-window.addEventListener("studygroup:xpprogress", (event) => {
-  if (!state.profile) return;
-  state.profile.xp = Number(event.detail?.xp) || 0;
-  renderAccount();
-});
+function bindCalculator() {
+  const display = $("#calculator-display");
+  const result = $("#calculator-result");
+  const keys = document.querySelector(".calculator-keys");
+  if (!display || !result || !keys) return;
 
-document.addEventListener("studygroup:tab", (event) => {
-  if (event.detail === "leaderboard" && state.profile && Date.now() - lastBoardLoad > 20000) refreshBoard();
-});
+  keys.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-calculator-key]");
+    if (!btn) return;
+    const key = btn.dataset.calculatorKey;
 
-fillSubjectSelects();
-initResourceFilter();
-initLeaderboard(refreshBoard);
-initWorkspaceUI();
-initSchoolPortal();
-
-const authCallback = consumeOAuthCallback();
-if (authCallback.error) showBanner(describeOAuthError(authCallback.error), true);
-if (authCallback.result === "google-linked") showBanner("Google is now connected to your StudyGroup account.");
-
-window.setTimeout(() => {
-  if (document.body.classList.contains("checking")) {
-    revealPage();
-    showBanner("StudyGroup is taking longer than usual to reach Neon Auth. Check your connection and refresh.", true);
-  }
-}, 8000);
-
-const urlParams = new URLSearchParams(window.location.search);
-const hasVerifier = urlParams.has("neon_auth_session_verifier") || urlParams.has("oauth");
-const checkDelay = hasVerifier ? 1200 : 0;
-
-window.setTimeout(() => {
-  authClient.getSession().then((result) => {
-    if (result.error) throw result.error;
-    const authUser = result.data?.user;
-    const user = authUser ? { ...authUser, uid: authUser.id, displayName: authUser.name } : null;
-    if (!user) {
-      leaveToLanding();
+    if (key === "clear") {
+      display.value = "";
+      result.textContent = "";
       return;
     }
-    loadUser(user);
-  }).catch((error) => {
-    console.error("Could not verify the Neon Auth session.", error);
-    revealPage();
-    showBanner("We couldn't check your sign-in. Please log in again.", true);
-    window.setTimeout(leaveToLanding, 2500);
+    if (key === "backspace") {
+      display.value = display.value.slice(0, -1);
+      calculateLive();
+      return;
+    }
+    if (key === "equals") {
+      calculateLive(true);
+      return;
+    }
+    display.value += key;
+    calculateLive();
   });
-}, checkDelay);
+
+  display.addEventListener("input", () => calculateLive());
+  display.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      calculateLive(true);
+    }
+  });
+
+  function calculateLive(commit = false) {
+    const val = display.value.trim();
+    if (!val) {
+      result.textContent = "";
+      return;
+    }
+    try {
+      const sanitized = val.replace(/×/g, "*").replace(/÷/g, "/").replace(/%/g, "/100");
+      if (!/^[\d+\-*/().\s]+$/.test(sanitized)) {
+        if (commit) result.textContent = "Invalid expression";
+        return;
+      }
+      const evaluated = Function(`'use strict'; return (${sanitized})`)();
+      if (isNaN(evaluated) || !isFinite(evaluated)) {
+        if (commit) result.textContent = "Cannot evaluate";
+        return;
+      }
+      result.textContent = `= ${evaluated}`;
+      if (commit) {
+        display.value = String(evaluated);
+      }
+    } catch (err) {
+      if (commit) result.textContent = "Error";
+    }
+  }
+}
+
+function bindTimer() {
+  const toggleBtn = $("#timer-toggle");
+  const resetBtn = $("#timer-reset");
+  const logBtn = $("#timer-log");
+  const focusInput = $("#focus-minutes");
+  const breakInput = $("#break-minutes");
+  const display = $("#timer-display");
+  const label = $("#timer-label");
+  const ring = $("#timer-ring");
+
+  if (!toggleBtn || !display) return;
+
+  toggleBtn.addEventListener("click", () => {
+    if (timerRunning) {
+      pauseTimer();
+    } else {
+      startTimer();
+    }
+  });
+
+  resetBtn.addEventListener("click", () => {
+    pauseTimer();
+    const mins = timerMode === "focus" ? Number(focusInput?.value || 25) : Number(breakInput?.value || 5);
+    timerSeconds = mins * 60;
+    updateTimerDisplay();
+  });
+
+  logBtn.addEventListener("click", async () => {
+    await completeSession();
+  });
+
+  focusInput?.addEventListener("change", () => {
+    if (!timerRunning && timerMode === "focus") {
+      timerSeconds = Number(focusInput.value) * 60;
+      updateTimerDisplay();
+    }
+  });
+
+  breakInput?.addEventListener("change", () => {
+    if (!timerRunning && timerMode === "break") {
+      timerSeconds = Number(breakInput.value) * 60;
+      updateTimerDisplay();
+    }
+  });
+
+  function startTimer() {
+    timerRunning = true;
+    toggleBtn.textContent = "Pause";
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+      if (timerSeconds > 0) {
+        timerSeconds--;
+        updateTimerDisplay();
+      } else {
+        clearInterval(timerInterval);
+        timerRunning = false;
+        toggleBtn.textContent = "Start";
+        if (timerMode === "focus") {
+          completeSession(true);
+        } else {
+          timerMode = "focus";
+          if (label) label.textContent = "Focus";
+          if (ring) ring.dataset.mode = "focus";
+          timerSeconds = Number(focusInput?.value || 25) * 60;
+          updateTimerDisplay();
+        }
+      }
+    }, 1000);
+  }
+
+  function pauseTimer() {
+    timerRunning = false;
+    toggleBtn.textContent = "Start";
+    if (timerInterval) clearInterval(timerInterval);
+  }
+
+  function updateTimerDisplay() {
+    const mins = Math.floor(timerSeconds / 60);
+    const secs = timerSeconds % 60;
+    display.textContent = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+}
+
+async function completeSession(autoLogged = false) {
+  if (!currentUser) return;
+  const focusInput = $("#focus-minutes");
+  const mins = Number(focusInput?.value || 25);
+  const subjectSelect = $("#timer-subject");
+  const subject = subjectSelect?.value || "Computer Science";
+
+  try {
+    await setDoc(doc(collection(db, "users", currentUser.uid, "sessions")), {
+      minutes: mins,
+      subject,
+      autoLogged,
+      createdAt: new Date().toISOString()
+    });
+
+    await addWeeklyMinutes(mins);
+    await loadSessions();
+    await loadStats();
+    
+    timerRunning = false;
+    const toggleBtn = $("#timer-toggle");
+    if (toggleBtn) toggleBtn.textContent = "Start";
+    if (timerInterval) clearInterval(timerInterval);
+    timerSeconds = mins * 60;
+    const minsField = $("#timer-display");
+    if (minsField) minsField.textContent = `${String(mins).padStart(2, "0")}:00`;
+  } catch (err) {
+    console.error("Failed to log study session:", err);
+  }
+}
+
+function bindLeaderboardTabs() {
+  $$("[data-board]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      $$("[data-board]").forEach((b) => b.classList.toggle("is-active", b === btn));
+      currentBoard = btn.dataset.board;
+      loadLeaderboard();
+    });
+  });
+
+  const refreshBtn = $("#refresh-leaderboard");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", loadLeaderboard);
+  }
+
+  const joinBtn = $("#member-join button");
+  if (joinBtn) {
+    joinBtn.addEventListener("click", () => openProfileDialog(false));
+  }
+}
+
+function bindNoteActions() {
+  const newBtn = $("#note-new");
+  const form = $("#note-form");
+  if (newBtn && form) {
+    newBtn.addEventListener("click", () => {
+      activeNoteId = null;
+      form.reset();
+      const status = $("#note-status");
+      if (status) status.textContent = "New note";
+      const delBtn = $("#note-delete");
+      if (delBtn) delBtn.hidden = true;
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+      const data = new FormData(form);
+      const title = data.get("title").trim();
+      const subject = data.get("subject");
+      const body = data.get("body");
+      if (!title) return;
+
+      try {
+        if (activeNoteId) {
+          await updateDoc(doc(db, "users", currentUser.uid, "notes", activeNoteId), {
+            title,
+            subject,
+            body,
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          const ref = await setDoc(doc(collection(db, "users", currentUser.uid, "notes")), {
+            title,
+            subject,
+            body,
+            createdAt: new Date().toISOString()
+          });
+        }
+        form.reset();
+        activeNoteId = null;
+        await loadNotes();
+      } catch (err) {
+        console.error("Failed to save note:", err);
+      }
+    });
+
+    const delBtn = $("#note-delete");
+    if (delBtn) {
+      delBtn.addEventListener("click", async () => {
+        if (!currentUser || !activeNoteId) return;
+        try {
+          await deleteDoc(doc(db, "users", currentUser.uid, "notes", activeNoteId));
+          form.reset();
+          activeNoteId = null;
+          delBtn.hidden = true;
+          await loadNotes();
+        } catch (err) {
+          console.error("Failed to delete note:", err);
+        }
+      });
+    }
+
+    const searchInput = $("#note-search");
+    if (searchInput) {
+      searchInput.addEventListener("input", loadNotes);
+    }
+  }
+}
+
+function bindGroupActions() {
+  const groupForm = $("#group-form");
+  if (groupForm) {
+    groupForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+      const data = new FormData(groupForm);
+      const name = data.get("name").trim();
+      const subject = data.get("subject");
+      if (!name) return;
+
+      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+      try {
+        await setDoc(doc(db, "studyGroups", code), {
+          name,
+          subject,
+          owner: currentUser.uid,
+          members: [currentUser.uid],
+          createdAt: new Date().toISOString()
+        });
+        groupForm.reset();
+        await loadGroups();
+        openGroupChat(code, name);
+      } catch (err) {
+        console.error("Failed to create group:", err);
+      }
+    });
+  }
+
+  const joinForm = $("#join-form");
+  if (joinForm) {
+    joinForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+      const data = new FormData(joinForm);
+      const code = data.get("code").trim().toUpperCase();
+      if (!code) return;
+
+      try {
+        const groupRef = doc(db, "studyGroups", code);
+        const snap = await getDoc(groupRef);
+        if (!snap.exists()) {
+          alert("Group not found with that code.");
+          return;
+        }
+        const groupData = snap.data();
+        const members = groupData.members || [];
+        if (!members.includes(currentUser.uid)) {
+          members.push(currentUser.uid);
+          await updateDoc(groupRef, { members });
+        }
+        joinForm.reset();
+        await loadGroups();
+        openGroupChat(code, groupData.name);
+      } catch (err) {
+        console.error("Failed to join group:", err);
+      }
+    });
+  }
+
+  const chatForm = $("#chat-form");
+  if (chatForm) {
+    chatForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentUser || !activeGroupCode) return;
+      const data = new FormData(chatForm);
+      const text = data.get("text").trim();
+      if (!text) return;
+
+      try {
+        const profileSnap = await getDoc(doc(null, "users", currentUser.uid));
+        const senderName = profileSnap.exists() ? (profileSnap.data().nickname || profileSnap.data().displayName || "Learner") : "Learner";
+
+        await setDoc(doc(collection(db, "studyGroups", activeGroupCode, "messages")), {
+          text,
+          sender: currentUser.uid,
+          senderName,
+          createdAt: new Date().toISOString()
+        });
+        chatForm.reset();
+      } catch (err) {
+        console.error("Failed to send message:", err);
+      }
+    });
+  }
+
+  const copyBtn = $("#copy-code");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", () => {
+      if (!activeGroupCode) return;
+      navigator.clipboard.writeText(activeGroupCode);
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => copyBtn.textContent = "Copy invite code", 2000);
+    });
+  }
+
+  const leaveBtn = $("#leave-group");
+  if (leaveBtn) {
+    leaveBtn.addEventListener("click", async () => {
+      if (!currentUser || !activeGroupCode) return;
+      try {
+        const groupRef = doc(db, "studyGroups", activeGroupCode);
+        const snap = await getDoc(groupRef);
+        if (snap.exists()) {
+          const members = (snap.data().members || []).filter(id => id !== currentUser.uid);
+          await updateDoc(groupRef, { members });
+        }
+        activeGroupCode = null;
+        $("#chat-room").hidden = true;
+        $("#chat-empty").hidden = false;
+        await loadGroups();
+      } catch (err) {
+        console.error("Failed to leave group:", err);
+      }
+    });
+  }
+}
+
+function bindSchoolActions() {
+  const refreshBtn = $("#school-refresh");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", loadSchoolData);
+  }
+}
+
+function populateSubjectDropdowns() {
+  $$("[data-subjects]").forEach((select) => {
+    const currentVal = select.value;
+    select.innerHTML = DEFAULT_SUBJECTS.map((sub) => `<option value="${sub}">${sub}</option>`).join("");
+    if (currentVal) select.value = currentVal;
+  });
+}
+
+async function loadAllPanelData() {
+  await Promise.all([
+    loadStats(),
+    loadTasks(),
+    loadExams(),
+    loadGrades(),
+    loadDecks(),
+    loadNotes(),
+    loadGroups(),
+    loadLeaderboard(),
+    loadSessions(),
+    loadSchoolData()
+  ]);
+}
+
+function startRealtimeListeners() {
+  // Realtime listeners can be registered here if needed
+}
+
+async function loadStats() {
+  if (!currentUser) return;
+  try {
+    const userSnap = await getDoc(doc(null, "users", currentUser.uid));
+    const userData = userSnap.exists() ? userSnap.data() : {};
+
+    const xpElem = $("#stat-xp");
+    if (xpElem) xpElem.textContent = userData.xp || 0;
+    const weekElem = $("#stat-week");
+    if (weekElem) weekElem.textContent = userData.weeklyMinutes || 0;
+
+    const tasksSnap = await getDocs(query(collection(db, "users", currentUser.uid, "tasks"), where("completed", "==", false)));
+    const openElem = $("#stat-open");
+    if (openElem) openElem.textContent = tasksSnap.docs.length;
+  } catch (err) {
+    console.error("Failed to load stats:", err);
+  }
+}
+
+async function loadTasks() {
+  if (!currentUser) return;
+  const container = $("#task-list");
+  const overviewContainer = $("#overview-tasks");
+  if (!container && !overviewContainer) return;
+
+  try {
+    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "tasks")));
+    const tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    if (container) {
+      container.innerHTML = tasks.length ? tasks.map(t => `
+        <div class="item-row ${t.completed ? "is-complete" : ""}">
+          <label><input type="checkbox" data-task-toggle="${t.id}" ${t.completed ? "checked" : ""} /> <span>${escapeHtml(t.title)}</span></label>
+          <span class="item-meta">${escapeHtml(t.subject || "")} · ${escapeHtml(t.due || "No due date")}</span>
+          <button class="button button-quiet" type="button" data-task-delete="${t.id}">Delete</button>
+        </div>
+      `).join("") : `<p class="muted-line">No tasks added yet.</p>`;
+
+      container.querySelectorAll("[data-task-toggle]").forEach(chk => {
+        chk.addEventListener("change", async (e) => {
+          const id = e.target.dataset.taskToggle;
+          await updateDoc(doc(db, "users", currentUser.uid, "tasks", id), { completed: e.target.checked });
+          await loadTasks();
+          await loadStats();
+        });
+      });
+
+      container.querySelectorAll("[data-task-delete]").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          const id = e.target.dataset.taskDelete;
+          await deleteDoc(doc(db, "users", currentUser.uid, "tasks", id));
+          await loadTasks();
+          await loadStats();
+        });
+      });
+    }
+
+    if (overviewContainer) {
+      const activeTasks = tasks.filter(t => !t.completed).slice(0, 3);
+      overviewContainer.innerHTML = activeTasks.length ? activeTasks.map(t => `
+        <div class="today-task">
+          <strong>${escapeHtml(t.title)}</strong>
+          <span>${escapeHtml(t.subject || "")}</span>
+        </div>
+      `).join("") : `<p class="muted-line">All caught up for today!</p>`;
+    }
+  } catch (err) {
+    console.error("Failed to load tasks:", err);
+  }
+}
+
+async function loadExams() {
+  if (!currentUser) return;
+  const container = $("#exam-list");
+  if (!container) return;
+
+  try {
+    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "exams")));
+    const exams = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    container.innerHTML = exams.length ? exams.map(ex => `
+      <div class="item-row">
+        <div><strong>${escapeHtml(ex.name)}</strong><span class="item-meta">${escapeHtml(ex.subject)} · Exam date: ${escapeHtml(ex.examDate)}</span></div>
+        <button class="button button-quiet" type="button" data-exam-delete="${ex.id}">Delete</button>
+      </div>
+    `).join("") : `<p class="muted-line">No exams scheduled.</p>`;
+
+    container.querySelectorAll("[data-exam-delete]").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.target.dataset.examDelete;
+        await deleteDoc(doc(db, "users", currentUser.uid, "exams", id));
+        await loadExams();
+      });
+    });
+  } catch (err) {
+    console.error("Failed to load exams:", err);
+  }
+}
+
+async function loadGrades() {
+  if (!currentUser) return;
+  const listContainer = $("#score-list");
+  const summaryContainer = $("#score-summary");
+  if (!listContainer || !summaryContainer) return;
+
+  try {
+    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "grades")));
+    const grades = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    listContainer.innerHTML = grades.length ? grades.map(g => `
+      <div class="item-row">
+        <div><strong>${escapeHtml(g.name)}</strong><span class="item-meta">${escapeHtml(g.subject)} · Score: ${g.score} / ${g.outOf} (${Math.round((g.score/g.outOf)*100)}%)</span></div>
+        <button class="button button-quiet" type="button" data-grade-delete="${g.id}">Delete</button>
+      </div>
+    `).join("") : `<p class="muted-line">No results logged yet.</p>`;
+
+    listContainer.querySelectorAll("[data-grade-delete]").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.target.dataset.gradeDelete;
+        await deleteDoc(doc(db, "users", currentUser.uid, "grades", id));
+        await loadGrades();
+      });
+    });
+
+    const bySubject = {};
+    grades.forEach(g => {
+      if (!bySubject[g.subject]) bySubject[g.subject] = { totalPct: 0, count: 0 };
+      bySubject[g.subject].totalPct += (g.score / g.outOf) * 100;
+      bySubject[g.subject].count++;
+    });
+
+    summaryContainer.innerHTML = Object.keys(bySubject).length ? Object.entries(bySubject).map(([sub, data]) => `
+      <div class="item-row">
+        <span><strong>${escapeHtml(sub)}</strong></span>
+        <span>${Math.round(data.totalPct / data.count)}% average (${data.count} logged)</span>
+      </div>
+    `).join("") : `<p class="muted-line">No subject summaries available.</p>`;
+  } catch (err) {
+    console.error("Failed to load grades:", err);
+  }
+}
+
+async function loadDecks() {
+  if (!currentUser) return;
+  const container = $("#deck-list");
+  if (!container) return;
+
+  try {
+    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "decks")));
+    const decks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    container.innerHTML = decks.length ? decks.map(d => `
+      <div class="item-row">
+        <div><strong>${escapeHtml(d.name)}</strong><span class="item-meta">${escapeHtml(d.subject)} · ${d.cards?.length || 0} cards</span></div>
+        <div class="item-actions">
+          <button class="button button-light" type="button" data-deck-study="${d.id}">Study</button>
+          <button class="button button-quiet" type="button" data-deck-delete="${d.id}">Delete</button>
+        </div>
+      </div>
+    `).join("") : `<p class="muted-line">No flashcard decks created.</p>`;
+
+    container.querySelectorAll("[data-deck-study]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const id = e.target.dataset.deckStudy;
+        const deck = decks.find(d => d.id === id);
+        if (deck) startFlashcardStudy(deck);
+      });
+    });
+
+    container.querySelectorAll("[data-deck-delete]").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.target.dataset.deckDelete;
+        await deleteDoc(doc(db, "users", currentUser.uid, "decks", id));
+        await loadDecks();
+      });
+    });
+  } catch (err) {
+    console.error("Failed to load decks:", err);
+  }
+}
+
+function startFlashcardStudy(deck) {
+  activeDeck = deck;
+  cardIndex = 0;
+  cardShowingAnswer = false;
+  const dialog = $("#study-dialog");
+  const title = $("#study-title");
+  const body = $("#study-body");
+  if (!dialog || !title || !body) return;
+
+  title.textContent = deck.name;
+  renderCard();
+  dialog.showModal();
+
+  const closeBtn = dialog.querySelector("[data-close-dialog]");
+  if (closeBtn) {
+    closeBtn.onclick = () => dialog.close();
+  }
+}
+
+function renderCard() {
+  const body = $("#study-body");
+  if (!activeDeck || !body) return;
+  const cards = activeDeck.cards || [];
+  if (cardIndex >= cards.length) {
+    body.innerHTML = `
+      <div class="flashcard-finished">
+        <h3>You finished this deck!</h3>
+        <p>Great job reviewing your flashcards.</p>
+        <button class="button button-dark" type="button" id="study-restart">Study again</button>
+      </div>
+    `;
+    $("#study-restart")?.addEventListener("click", () => {
+      cardIndex = 0;
+      cardShowingAnswer = false;
+      renderCard();
+    });
+    return;
+  }
+
+  const card = cards[cardIndex];
+  body.innerHTML = `
+    <div class="flashcard-card ${cardShowingAnswer ? "is-flipped" : ""}" id="flashcard-box">
+      <span class="flashcard-counter">Card ${cardIndex + 1} of ${cards.length}</span>
+      <div class="flashcard-content">
+        <h4>${cardShowingAnswer ? "Answer" : "Question"}</h4>
+        <p>${escapeHtml(cardShowingAnswer ? card.answer : card.question)}</p>
+      </div>
+      <button class="button button-light" type="button" id="flip-card">${cardShowingAnswer ? "Show question" : "Show answer"}</button>
+    </div>
+    <div class="flashcard-nav">
+      <button class="button button-dark" type="button" id="next-card" ${cardShowingAnswer ? "" : "disabled"}>Next card →</button>
+    </div>
+  `;
+
+  $("#flip-card").addEventListener("click", () => {
+    cardShowingAnswer = !cardShowingAnswer;
+    renderCard();
+  });
+
+  $("#next-card")?.addEventListener("click", () => {
+    cardIndex++;
+    cardShowingAnswer = false;
+    renderCard();
+  });
+}
+
+async function loadNotes() {
+  if (!currentUser) return;
+  const container = $("#note-list");
+  const form = $("#note-form");
+  const searchInput = $("#note-search");
+  if (!container || !form) return;
+
+  try {
+    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "notes")));
+    let notes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    const term = searchInput?.value?.trim()?.toLowerCase();
+    if (term) {
+      notes = notes.filter(n => n.title.toLowerCase().includes(term) || n.body?.toLowerCase().includes(term));
+    }
+
+    container.innerHTML = notes.length ? notes.map(n => `
+      <button class="group-item ${n.id === activeNoteId ? "is-active" : ""}" type="button" data-note-select="${n.id}">
+        <strong>${escapeHtml(n.title)}</strong>
+        <small>${escapeHtml(n.subject || "")}</small>
+      </button>
+    `).join("") : `<p class="muted-line">No notes found.</p>`;
+
+    container.querySelectorAll("[data-note-select]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.noteSelect;
+        const note = notes.find(n => n.id === id);
+        if (note) {
+          activeNoteId = note.id;
+          form.elements["title"].value = note.title;
+          form.elements["subject"].value = note.subject || DEFAULT_SUBJECTS[0];
+          form.elements["body"].value = note.body || "";
+          const status = $("#note-status");
+          if (status) status.textContent = "Editing saved note";
+          const delBtn = $("#note-delete");
+          if (delBtn) delBtn.hidden = false;
+          loadNotes();
+        }
+      });
+    });
+  } catch (err) {
+    console.error("Failed to load notes:", err);
+  }
+}
+
+async function loadGroups() {
+  if (!currentUser) return;
+  const container = $("#group-list");
+  if (!container) return;
+
+  try {
+    const snap = await getDocs(query(collection(db, "studyGroups"), where("members", "array-contains", currentUser.uid)));
+    const groups = snap.docs.map(d => ({ code: d.id, ...d.data() }));
+
+    container.innerHTML = groups.length ? groups.map(g => `
+      <button class="group-item ${g.code === activeGroupCode ? "is-active" : ""}" type="button" data-group-select="${g.code}" data-group-name="${escapeHtml(g.name)}">
+        <strong>${escapeHtml(g.name)}</strong>
+        <small>${escapeHtml(g.subject)} · ${g.members?.length || 1} members</small>
+      </button>
+    `).join("") : `<p class="muted-line">Not in any study groups yet.</p>`;
+
+    container.querySelectorAll("[data-group-select]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const code = btn.dataset.groupSelect;
+        const name = btn.dataset.groupName;
+        openGroupChat(code, name);
+      });
+    });
+  } catch (err) {
+    console.error("Failed to load groups:", err);
+  }
+}
+
+async function openGroupChat(code, name) {
+  activeGroupCode = code;
+  $("#chat-empty").hidden = true;
+  const room = $("#chat-room");
+  room.hidden = false;
+  $("#chat-title").textContent = name;
+  $("#chat-meta").textContent = `Invite code: ${code}`;
+
+  await loadChatMessages(code);
+  await loadGroups();
+}
+
+async function loadChatMessages(code) {
+  const container = $("#chat-messages");
+  if (!container) return;
+
+  try {
+    const snap = await getDocs(query(collection(db, "studyGroups", code, "messages")));
+    const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    msgs.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+    container.innerHTML = msgs.length ? msgs.map(m => `
+      <div class="chat-message ${m.sender === currentUser?.uid ? "is-mine" : ""}">
+        <span class="chat-sender">${escapeHtml(m.senderName || "Learner")}</span>
+        <p>${escapeHtml(m.text)}</p>
+      </div>
+    `).join("") : `<p class="muted-line">No messages yet. Say hello!</p>`;
+
+    container.scrollTop = container.scrollHeight;
+  } catch (err) {
+    console.error("Failed to load messages:", err);
+  }
+}
+
+async function loadLeaderboard() {
+  const container = $("#leaderboard-list");
+  const rankElem = $("#my-rank");
+  if (!container) return;
+
+  try {
+    const snap = await getDocs(query(collection(db, "publicLeaderboard")));
+    let entries = snap.docs.map(d => d.data());
+
+    if (currentBoard === "xp") {
+      entries.sort((a, b) => (b.xp || 0) - (a.xp || 0));
+    } else {
+      entries.sort((a, b) => (b.weeklyMinutes || 0) - (a.weeklyMinutes || 0));
+    }
+
+    container.innerHTML = entries.length ? entries.slice(0, 10).map((e, idx) => `
+      <div class="leaderboard-row ${e.uid === currentUser?.uid ? "is-me" : ""}">
+        <span class="rank-num">#${idx + 1}</span>
+        <span class="rank-name">${escapeHtml(e.nickname || e.displayName || "Learner")} ✳</span>
+        <span class="rank-score">${currentBoard === "xp" ? `${e.xp || 0} XP` : `${e.weeklyMinutes || 0} mins`}</span>
+      </div>
+    `).join("") : `<p class="muted-line">No members on the leaderboard yet. Opt in from your profile!</p>`;
+
+    if (currentUser && rankElem) {
+      const myIdx = entries.findIndex(e => e.uid === currentUser.uid);
+      rankElem.textContent = myIdx !== -1 ? `Your rank: #${myIdx + 1}` : "You are not currently on the public leaderboard. Opt in via your profile settings!";
+    }
+  } catch (err) {
+    console.error("Failed to load leaderboard:", err);
+    container.innerHTML = `<p class="muted-line">Could not load leaderboard.</p>`;
+  }
+}
+
+async function loadSessions() {
+  if (!currentUser) return;
+  const listContainer = $("#session-list");
+  const barsContainer = $("#week-bars");
+  if (!listContainer || !barsContainer) return;
+
+  try {
+    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "sessions")));
+    const sessions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    sessions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    listContainer.innerHTML = sessions.length ? sessions.slice(0, 5).map(s => `
+      <div class="item-row">
+        <span><strong>${s.minutes} mins focus</strong></span>
+        <span class="item-meta">${escapeHtml(s.subject)} · ${new Date(s.createdAt).toLocaleDateString()}</span>
+      </div>
+    `).join("") : `<p class="muted-line">No study sessions logged yet.</p>`;
+
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    barsContainer.innerHTML = days.map(d => `
+      <div class="week-bar-col">
+        <div class="week-bar"><i></i></div>
+        <span>${d}</span>
+      </div>
+    `).join("");
+  } catch (err) {
+    console.error("Failed to load sessions:", err);
+  }
+}
+
+async function loadSchoolData() {
+  const statusElem = $("#school-status");
+  if (statusElem) {
+    statusElem.textContent = "School workspace is available.";
+  }
+}
+
+async function downloadUserData() {
+  if (!currentUser) return;
+  try {
+    const data = {
+      uid: currentUser.uid,
+      email: currentUser.email,
+      exportedAt: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "studygroup-data.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("Failed to download data:", err);
+  }
+}
+
+function escapeHtml(str) {
+  return String(str || "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[m]);
+}
