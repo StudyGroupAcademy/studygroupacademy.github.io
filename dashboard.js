@@ -1,4 +1,5 @@
-import { authClient } from "./auth-client.js";
+import { auth, googleProvider } from "./firestore-client.js";
+import { signInWithPopup, signOut as firebaseSignOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import {
   $,
   $$,
@@ -245,26 +246,22 @@ $("#link-google").addEventListener("click", async (event) => {
   button.disabled = true;
   setFormError($("#profile-error"), "");
   try {
-    const callbackBase = `${window.location.origin}${window.location.pathname}`;
-    const result = await authClient.signIn.social({
-      provider: "google",
-      callbackURL: `${callbackBase}?oauth=google-linked`,
-      errorCallbackURL: `${callbackBase}?error=linking-failed`
-    });
-    if (result.error) throw result.error;
-    if (!result.data?.url) throw new Error("Neon Auth did not return a Google authorization URL.");
-    window.location.assign(result.data.url);
+    const result = await signInWithPopup(auth, googleProvider);
+    const authUser = result.user;
+    const user = { uid: authUser.uid, email: authUser.email, displayName: authUser.displayName };
+    await loadUser(user);
+    showToast("Google account connected successfully.");
   } catch (error) {
-    console.error("Could not sign in with Google.", error);
+    console.error("Could not sign in with Google via Firebase.", error);
     setFormError($("#profile-error"), error.message || getErrorMessage(error));
+  } finally {
     button.disabled = false;
   }
 });
 
 $("#sign-out").addEventListener("click", async () => {
   try {
-    const result = await authClient.signOut();
-    if (result.error) throw result.error;
+    await firebaseSignOut(auth);
     leaveToLanding();
   } catch (error) {
     console.error("Could not sign out of StudyGroup.", error);
@@ -300,28 +297,15 @@ if (authCallback.result === "google-linked") showBanner("Google is now connected
 window.setTimeout(() => {
   if (document.body.classList.contains("checking")) {
     revealPage();
-    showBanner("StudyGroup is taking longer than usual to reach Neon Auth. Check your connection and refresh.", true);
+    showBanner("StudyGroup is taking longer than usual to check your account. Check your connection and refresh.", true);
   }
 }, 8000);
 
-const urlParams = new URLSearchParams(window.location.search);
-const hasVerifier = urlParams.has("neon_auth_session_verifier") || urlParams.has("oauth");
-const checkDelay = hasVerifier ? 1200 : 0;
-
-window.setTimeout(() => {
-  authClient.getSession().then((result) => {
-    if (result.error) throw result.error;
-    const authUser = result.data?.user;
-    const user = authUser ? { ...authUser, uid: authUser.id, displayName: authUser.name } : null;
-    if (!user) {
-      leaveToLanding();
-      return;
-    }
-    loadUser(user);
-  }).catch((error) => {
-    console.error("Could not verify the Neon Auth session.", error);
-    revealPage();
-    showBanner("We couldn't check your sign-in. Please log in again.", true);
-    window.setTimeout(leaveToLanding, 2500);
-  });
-}, checkDelay);
+auth.onAuthStateChanged((authUser) => {
+  if (!authUser) {
+    leaveToLanding();
+    return;
+  }
+  const user = { uid: authUser.uid, email: authUser.email, displayName: authUser.displayName };
+  loadUser(user);
+});
