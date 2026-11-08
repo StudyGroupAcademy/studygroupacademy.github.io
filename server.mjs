@@ -292,7 +292,101 @@ async function readJson(request) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
+function leaderboardPeriodKeys(date) {
+  const monday = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+  const yearStart = date.getUTCMonth() >= 8 ? date.getUTCFullYear() : date.getUTCFullYear() - 1;
+  return {
+    weekKey: monday.toISOString().slice(0, 10),
+    monthKey: date.toISOString().slice(0, 7),
+    yearKey: `${yearStart}-09-01`
+  };
+}
+
 async function dataRequest(uid, body) {
+  if (body.op === "syncXp") {
+    if (!uid) throw new Error("Please sign in to synchronise your leaderboard XP.");
+    const userPath = `users/${uid}`;
+    const profileRecord = await record(pool, userPath);
+    if (!profileRecord) throw new Error("Your learner profile could not be found.");
+    const profile = profileRecord.data || {};
+    if (!profile.leaderboardOptIn) {
+      await pool.query("DELETE FROM app_records WHERE path = $1 AND owner_id = $2", [`publicLeaderboard/${uid}`, uid]);
+      return { synced: false, reason: "opted-out", totalXp: Number(profile.xp) || 0 };
+    }
+
+    const progressPrefix = `${userPath}/learningProgress/`;
+    const progressResult = await pool.query(
+      "SELECT data FROM app_records WHERE path LIKE $1 AND array_length(string_to_array(path, '/'), 1) = 4",
+      [`${progressPrefix}%`]
+    );
+    const now = new Date();
+    const keys = leaderboardPeriodKeys(now);
+    const totals = { weekly: 0, monthly: 0, yearly: 0, all: 0 };
+    for (const row of progressResult.rows) {
+      const activity = row.data || {};
+      const amount = Math.max(0, Number(activity.xp) || 10);
+      const completed = new Date(activity.completedAt || activity.createdAt || 0);
+      if (!Number.isFinite(completed.getTime()) || completed.getTime() <= 0) continue;
+      totals.all += amount;
+      const activityKeys = leaderboardPeriodKeys(completed);
+      if (activityKeys.weekKey === keys.weekKey) totals.weekly += amount;
+      if (activityKeys.monthKey === keys.monthKey) totals.monthly += amount;
+      if (activityKeys.yearKey === keys.yearKey) totals.yearly += amount;
+    }
+    const lifetimeXp = Math.max(0, Number(profile.xp) || 0, totals.all);
+    const legacyXp = Math.max(0, lifetimeXp - totals.all);
+    totals.weekly += legacyXp;
+    totals.monthly += legacyXp;
+    totals.yearly += legacyXp;
+
+    if (lifetimeXp !== (Number(profile.xp) || 0)) {
+      profile.xp = lifetimeXp;
+      profile.updatedAt = now.toISOString();
+      await pool.query("UPDATE app_records SET data = $2::jsonb, updated_at = now() WHERE path = $1", [userPath, JSON.stringify(profile)]);
+    }
+
+    const publicData = applyFields({}, {
+      uid,
+      displayName: profile.displayName || profile.nickname || "Learner",
+      nickname: profile.nickname || profile.displayName || "Learner",
+      handle: profile.handle || "user",
+      xp: lifetimeXp,
+      xpWeekly: totals.weekly,
+      weekKey: keys.weekKey,
+      xpMonthly: totals.monthly,
+      monthKey: keys.monthKey,
+      xpYearly: totals.yearly,
+      yearKey: keys.yearKey,
+      updatedAt: now.toISOString()
+    });
+    await pool.query(
+      `INSERT INTO app_records (path, owner_id, data, updated_at) VALUES ($1, $2, $3::jsonb, now())
+       ON CONFLICT (path) DO UPDATE SET owner_id = EXCLUDED.owner_id, data = EXCLUDED.data, updated_at = now()`,
+      [`publicLeaderboard/${uid}`, uid, JSON.stringify(publicData)]
+    );
+    if (profile.handle) {
+      const publicProfile = applyFields({}, {
+        uid,
+        handle: String(profile.handle).toLowerCase(),
+        displayName: profile.displayName || profile.nickname || "Learner",
+        nickname: profile.nickname || profile.displayName || "Learner",
+        bio: profile.bio || "",
+        xp: lifetimeXp,
+        yearGroup: profile.yearGroup || "",
+        boards: profile.boards || {},
+        createdAt: profile.createdAt || now.toISOString(),
+        updatedAt: now.toISOString()
+      });
+      await pool.query(
+        `INSERT INTO app_records (path, owner_id, data, updated_at) VALUES ($1, $2, $3::jsonb, now())
+         ON CONFLICT (path) DO UPDATE SET data = EXCLUDED.data, updated_at = now() WHERE app_records.owner_id = EXCLUDED.owner_id`,
+        [`publicProfiles/${String(profile.handle).toLowerCase()}`, uid, JSON.stringify(publicProfile)]
+      );
+    }
+    return { synced: true, totalXp: lifetimeXp, weeklyXp: totals.weekly, monthlyXp: totals.monthly, yearlyXp: totals.yearly };
+  }
+
   if (body.op === "completeActivity") {
     if (!uid) throw new Error("Please sign in to complete this activity.");
     const activityId = String(body.activityId || "");

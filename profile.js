@@ -1,7 +1,9 @@
 import { collection, doc, getDoc, getDocs } from "./firestore-client.js";
 
 const rawQuery = window.location.search.slice(1).split("&")[0];
-const handle = decodeURIComponent(rawQuery.split("=")[0] || "").trim().replace(/^@/, "").toLowerCase();
+const queryHandle = decodeURIComponent(rawQuery.split("=")[0] || "").trim().replace(/^@/, "").toLowerCase();
+const pathHandle = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, "")).trim().replace(/^@/, "").toLowerCase();
+const handle = pathHandle || queryHandle;
 const reserved = new Set(["", "invite", "oauth", "error", "utm_source", "utm_medium", "utm_campaign"]);
 
 if (!reserved.has(handle) && /^[a-z0-9_]{3,20}$/.test(handle)) {

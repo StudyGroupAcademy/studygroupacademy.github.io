@@ -1,5 +1,5 @@
 import { authClient, getCurrentSession, getSessionUser } from "./auth-client.js";
-import { addDoc, arrayUnion, collection, completeActivity, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from "./firestore-client.js";
+import { addDoc, arrayUnion, collection, completeActivity, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, syncLeaderboardXp, updateDoc, where } from "./firestore-client.js";
 import { $, $$, db, state, showBanner } from "./core.js";
 import { ensureUserProfile, saveDailyGoal, saveProfileChoices, takeWelcomeFlag } from "./session.js";
 import { consumeOAuthCallback, describeOAuthError } from "./helpers.js";
@@ -109,7 +109,7 @@ function renderSignedIn(profile) {
   const handleElem = $("#account-handle");
   if (handleElem) {
     handleElem.textContent = `@${profile.handle || "user"}`;
-    handleElem.href = `${window.location.origin}/?${encodeURIComponent(profile.handle || "user")}`;
+    handleElem.href = `${window.location.origin}/${encodeURIComponent(profile.handle || "user")}`;
     handleElem.title = "View your public profile";
   }
   const accountBadge = $("#account-badge");
@@ -1440,13 +1440,17 @@ async function loadLeaderboard() {
   if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.classList.add('is-refreshing'); }
   container.innerHTML = '<div class="leaderboard-loading"><span class="loading-spinner"></span> Loading the rankings…</div>';
   try {
+    if (currentUser && state.profile?.leaderboardOptIn) await syncLeaderboardXp();
     const snap = await getDocs(query(collection(db, 'publicLeaderboard'), limit(250)));
     const users = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
       .filter((user) => user[keyField] === key && Number(user[field]) > 0)
       .sort((a, b) => (Number(b[field]) || 0) - (Number(a[field]) || 0))
       .slice(0, 10);
     if (!users.length) {
-      container.innerHTML = `<div class="leaderboard-message"><span>✳</span><strong>A new ${period} starts here.</strong><p>Complete lessons and worksheets to earn XP and take the first place on this board.</p></div>`;
+      const message = state.profile?.leaderboardOptIn
+        ? "Your completed activities will appear here once your XP has synchronised. Try refreshing in a moment."
+        : "Opt in from your profile to share your study name and appear here. Complete lessons and worksheets to earn XP.";
+      container.innerHTML = `<div class="leaderboard-message"><span>✳</span><strong>A new ${period} starts here.</strong><p>${message}</p></div>`;
     } else {
       container.innerHTML = users.map((user, index) => {
         const rank = index + 1;

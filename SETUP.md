@@ -34,3 +34,11 @@ Keep database credentials, OAuth client secrets, and Cloudinary secrets in Rende
 ## Checks
 
 Run `npm test` for the existing unit tests and `npm run build` to syntax-check the server and browser JavaScript modules.
+
+## Public learner profile URLs
+
+GitHub Pages uses the root `404.html` fallback for clean profile paths such as `https://studygroupacademy.github.io/ayaan`. Keep `404.html` at the repository root and deploy it with `profile.js` and `styles.css`. The profile script reads the handle from the requested path; the older `/?ayaan` form remains supported for compatibility. GitHub Pages still serves fallback pages with an HTTP 404 status, which is a limitation of static hosting even though the profile content renders in the browser.
+
+## Leaderboard XP synchronisation
+
+The dashboard and homepage call the authenticated `/api/data` `syncXp` operation for opted-in learners. The server rebuilds lifetime and current-period XP from completed learning activity records, then updates the public leaderboard and profile records. Deploy the updated `server.mjs` to Render as well as the frontend files to GitHub Pages.

@@ -1,6 +1,6 @@
 import { authClient, getAuthToken, getCurrentSession, getSessionUser, normalizeSessionResult } from "./auth-client.js";
 import { $, $$, db, getErrorMessage, setFormError, showBanner, showToast } from "./core.js";
-import { doc, serverTimestamp, setDoc } from "./firestore-client.js";
+import { doc, serverTimestamp, setDoc, syncLeaderboardXp } from "./firestore-client.js";
 import { cleanNickname, consumeOAuthCallback, describeOAuthError, validNickname } from "./helpers.js";
 import { ensureUserProfile } from "./session.js";
 import { initLeaderboard, loadLeaderboard } from "./leaderboard.js";
@@ -231,8 +231,15 @@ async function refreshAuthState({ loadProfile = true, retries = 0 } = {}) {
   const user = getSessionUser(result);
   let profile = null;
   if (user && loadProfile) {
-    try { profile = await ensureUserProfile(user); }
-    catch (error) { console.warn("The signed-in account profile could not be loaded.", error); }
+    try {
+      profile = await ensureUserProfile(user);
+      if (profile?.leaderboardOptIn) {
+        try {
+          await syncLeaderboardXp();
+          await loadLeaderboard();
+        } catch (error) { console.warn("The public leaderboard could not be synchronised yet.", error); }
+      }
+    } catch (error) { console.warn("The signed-in account profile could not be loaded.", error); }
   }
   renderAuthState(user, profile);
   return sessionData;
@@ -311,8 +318,20 @@ if (homeworkForm) homeworkForm.addEventListener("submit", async (event) => {
   }
 });
 
+const profileQuery = window.location.search.slice(1).split("&")[0];
+const profileQueryKey = (() => {
+  try { return decodeURIComponent(profileQuery.split("=")[0] || "").replace(/^@/, "").toLowerCase(); }
+  catch { return ""; }
+})();
+const reservedQueryKeys = new Set(["", "invite", "oauth", "error", "utm_source", "utm_medium", "utm_campaign"]);
+const pathProfileKey = (() => {
+  try { return decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, "")).replace(/^@/, "").toLowerCase(); }
+  catch { return ""; }
+})();
+const isPublicProfileRoute = [profileQueryKey, pathProfileKey].some((key) => /^[a-z0-9_]{3,20}$/.test(key) && !reservedQueryKeys.has(key));
+
 refreshAuthState({ retries: 2 }).then((session) => {
-  if (session?.user) {
+  if (session?.user && !isPublicProfileRoute) {
     const dashboard = new URL("dashboard/", document.baseURI);
     const invite = new URLSearchParams(window.location.search).get("invite");
     if (invite) dashboard.searchParams.set("invite", invite);

@@ -1,5 +1,5 @@
 import { getCurrentSession, getSessionUser } from "./auth-client.js";
-import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "./firestore-client.js";
+import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, syncLeaderboardXp, updateDoc, where } from "./firestore-client.js";
 
 export const NICKNAME_RULE = "Use 2–30 characters: letters, numbers, spaces, hyphens, or apostrophes.";
 
@@ -119,6 +119,10 @@ export async function saveProfileChoices(profileData, optIn) {
     }, { merge: true });
   } else {
     await deleteDoc(publicRef);
+  }
+  if (optIn) {
+    try { await syncLeaderboardXp(); }
+    catch (error) { console.warn("The leaderboard will synchronise when it next loads.", error); }
   }
 }
 
