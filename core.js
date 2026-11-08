@@ -10,6 +10,7 @@ let toastTimer;
 
 export function showToast(message) {
   const toast = $("#toast");
+  if (!toast) return;
   toast.textContent = message;
   toast.classList.add("visible");
   window.clearTimeout(toastTimer);
@@ -18,6 +19,7 @@ export function showToast(message) {
 
 export function showBanner(message, error = false) {
   const banner = $("#status-banner") || $("#firebase-banner");
+  if (!banner) return;
   banner.textContent = message;
   banner.classList.toggle("is-error", error);
   banner.classList.add("visible");
@@ -28,6 +30,7 @@ export function showBanner(message, error = false) {
 }
 
 export function setFormError(element, message) {
+  if (!element) return;
   element.textContent = message;
   element.hidden = !message;
 }
