@@ -11,7 +11,8 @@ let currentUser = null;
 let currentTab = "overview";
 let currentTaskFilter = "all";
 let currentBoard = "xp";
-let calendarDate = new Date();
+let calendarDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let calendarSelected = new Date().toISOString().slice(0, 10);
 let activeGroupCode = null;
 let activeNoteId = null;
 let timerSeconds = 25 * 60;
@@ -93,7 +94,7 @@ async function handleSignedInUser(user) {
 
 function renderSignedIn(profile) {
   const isPlaceholder = (value) => !value || ["learner", "student", "user"].includes(String(value).trim().toLowerCase());
-  const name = [profile.nickname, profile.displayName, currentUser?.name, currentUser?.email?.split("@")[0]].find((value) => !isPlaceholder(value)) || "Learner";
+  const name = [currentUser?.name, currentUser?.user_metadata?.full_name, currentUser?.user_metadata?.name, profile.displayName, profile.nickname, currentUser?.email?.split("@")[0]].find((value) => !isPlaceholder(value)) || "StudyGroup student";
   const initial = name.charAt(0).toUpperCase();
   
   const headerName = $("#header-name");
@@ -209,7 +210,60 @@ function switchTab(tabName) {
   window.location.hash = tabName;
 }
 
+function renderPlannerCalendar(tasks = []) {
+  const grid = $("#calendar-grid");
+  if (!grid) return;
+  const year = calendarDate.getFullYear();
+  const month = calendarDate.getMonth();
+  const title = $("#calendar-title");
+  if (title) title.textContent = calendarDate.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const offset = (new Date(year, month, 1).getDay() + 6) % 7;
+  const today = new Date().toISOString().slice(0, 10);
+  const cells = [];
+  for (let i = 0; i < 42; i += 1) {
+    const date = new Date(year, month, i - offset + 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+    const dayTasks = tasks.filter(task => task.due === key);
+    cells.push(`<button type="button" class="calendar-day${date.getMonth() !== month ? " is-outside" : ""}${key === today ? " is-today" : ""}${key === calendarSelected ? " is-selected" : ""}" data-calendar-day="${key}" aria-label="${date.toLocaleDateString()}"><span class="calendar-day-number">${date.getDate()}</span>${dayTasks.slice(0,2).map(task => `<span class="calendar-event${task.completed ? " is-done" : ""}">${escapeHtml(task.title)}</span>`).join("")}${dayTasks.length > 2 ? `<span class="calendar-more">+${dayTasks.length-2} more</span>` : ""}</button>`);
+  }
+  grid.innerHTML = cells.join("");
+  const selected = $("#calendar-selection");
+  if (selected) {
+    const count = tasks.filter(task => task.due === calendarSelected).length;
+    selected.textContent = `${new Date(`${calendarSelected}T12:00:00`).toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"})}: ${count ? `${count} planned ${count === 1 ? "task" : "tasks"}` : "no tasks planned"}.`;
+  }
+}
+
+function bindPlannerCalendar() {
+  const grid = $("#calendar-grid");
+  if (!grid || grid.dataset.bound) return;
+  grid.dataset.bound = "true";
+  grid.addEventListener("click", event => {
+    const day = event.target.closest("[data-calendar-day]");
+    if (!day) return;
+    calendarSelected = day.dataset.calendarDay;
+    const due = $("#task-form")?.elements?.due;
+    if (due) due.value = calendarSelected;
+    loadTasks();
+  });
+  $("#calendar-prev")?.addEventListener("click", () => { calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth()-1, 1); loadTasks(); });
+  $("#calendar-next")?.addEventListener("click", () => { calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth()+1, 1); loadTasks(); });
+  $("#calendar-today")?.addEventListener("click", () => { const now = new Date(); calendarDate = new Date(now.getFullYear(),now.getMonth(),1); calendarSelected = now.toISOString().slice(0,10); loadTasks(); });
+  $("#clear-done")?.addEventListener("click", async () => {
+    if (!currentUser) return;
+    const snap = await getDocs(query(collection(db,"users",currentUser.uid,"tasks")));
+    await Promise.all(snap.docs.filter(item => item.data().completed || item.data().done).map(item => deleteDoc(doc(db,"users",currentUser.uid,"tasks",item.id))));
+    await loadTasks(); await loadStats();
+  });
+  $$ ("[data-task-filter]").forEach(button => button.addEventListener("click", () => {
+    currentTaskFilter = button.dataset.taskFilter;
+    $$ ("[data-task-filter]").forEach(item => item.classList.toggle("is-active", item === button));
+    loadTasks();
+  }));
+}
+
 function bindForms() {
+  bindPlannerCalendar();
   const taskForm = $("#task-form");
   if (taskForm) {
     taskForm.addEventListener("submit", async (e) => {
@@ -229,6 +283,7 @@ function bindForms() {
           due: due || null,
           time: time || null,
           completed: false,
+          done: false,
           createdAt: new Date().toISOString()
         });
         taskForm.reset();
@@ -885,10 +940,11 @@ async function loadTasks() {
 
   try {
     const snap = await getDocs(query(collection(db, "users", currentUser.uid, "tasks")));
-    const tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const tasks = snap.docs.map(d => { const data = d.data(); return { id: d.id, ...data, completed: Boolean(data.completed ?? data.done) }; });
 
     if (container) {
-      container.innerHTML = tasks.length ? tasks.map(t => `
+      const visibleTasks = tasks.filter(task => currentTaskFilter === "all" || (currentTaskFilter === "done" ? task.completed : !task.completed));
+      container.innerHTML = visibleTasks.length ? visibleTasks.map(t => `
         <div class="item-row ${t.completed ? "is-complete" : ""}">
           <label><input type="checkbox" data-task-toggle="${t.id}" ${t.completed ? "checked" : ""} /> <span>${escapeHtml(t.title)}</span></label>
           <span class="item-meta">${escapeHtml(t.subject || "")} · ${escapeHtml(t.due || "No due date")}</span>
@@ -899,7 +955,7 @@ async function loadTasks() {
       container.querySelectorAll("[data-task-toggle]").forEach(chk => {
         chk.addEventListener("change", async (e) => {
           const id = e.target.dataset.taskToggle;
-          await updateDoc(doc(db, "users", currentUser.uid, "tasks", id), { completed: e.target.checked });
+          await updateDoc(doc(db, "users", currentUser.uid, "tasks", id), { completed: e.target.checked, done: e.target.checked });
           await loadTasks();
           await loadStats();
         });
@@ -914,6 +970,10 @@ async function loadTasks() {
         });
       });
     }
+
+    renderPlannerCalendar(tasks);
+    const clearDone = $("#clear-done");
+    if (clearDone) clearDone.hidden = !tasks.some(task => task.completed);
 
     if (overviewContainer) {
       const activeTasks = tasks.filter(t => !t.completed).slice(0, 3);
@@ -1199,8 +1259,8 @@ async function loadLeaderboard() {
   const container = $("#leaderboard-list");
   if (!container) return;
   try {
-    const snap = await getDocs(query(collection(db, "publicLeaderboard"), limit(10)));
-    const users = snap.docs.map(d => d.data());
+    const snap = await getDocs(query(collection(db, "publicLeaderboard"), limit(100)));
+    const users = snap.docs.map(d => d.data()).sort((a, b) => (Number(b.xp) || 0) - (Number(a.xp) || 0)).slice(0, 10);
     container.innerHTML = users.length ? users.map((u, index) => `
       <div class="item-row">
         <span><strong>#${index + 1} ${escapeHtml(u.nickname || u.displayName || "Learner")}</strong></span>
