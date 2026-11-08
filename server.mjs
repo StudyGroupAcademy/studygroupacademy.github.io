@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { createHash, randomBytes } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import cloudinaryPackage from "cloudinary";
 import pg from "pg";
@@ -49,6 +50,7 @@ const jwks = createRemoteJWKSet(new URL(authJwksUrl));
 const pool = new Pool({ connectionString: databaseUrl, max: 5 });
 const databaseSchema = await readFile(new URL("./migrations/001_initial.sql", import.meta.url), "utf8");
 await pool.query(databaseSchema);
+await pool.query(`ALTER TABLE assignment_submissions ADD COLUMN IF NOT EXISTS grade numeric(5,2), ADD COLUMN IF NOT EXISTS grade_feedback text NOT NULL DEFAULT '', ADD COLUMN IF NOT EXISTS graded_by text, ADD COLUMN IF NOT EXISTS graded_at timestamptz`);
 
 const slugify = (value) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
   .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -528,6 +530,449 @@ async function authenticatedUser(request) {
   }
 }
 
+
+const teacherPermissionKeys = new Set([
+  "post_homework", "edit_shared_homework", "review_student_submissions", "invite_and_manage_accounts", "view_student_grades", "grade_student_work"
+]);
+const studentPermissionKeys = new Set([
+  "view_homework", "upload_submissions", "comment_privately_to_teachers", "view_feedback_and_grades"
+]);
+const hashInviteToken = (token) => createHash("sha256").update(String(token)).digest("hex");
+const cleanText = (value, maximum, label) => {
+  const text = String(value ?? "").trim();
+  if (!text || text.length > maximum) throw new Error(`${label} is required and must be ${maximum} characters or fewer.`);
+  return text;
+};
+const inviteUrl = (token) => {
+  const url = new URL("/", frontendOrigin);
+  url.searchParams.set("invite", token);
+  return url.toString();
+};
+const isSchoolAdmin = (identity) => Boolean(identity?.email && identity.email.toLowerCase() === schoolAdminEmail);
+
+async function createSchoolInvite(client, { schoolId, email, role, permissions, createdBy }) {
+  const normalizedEmail = cleanText(email, 254, "Email address").toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) throw new Error("Enter a valid email address.");
+  if (!["school_admin", "teacher", "student"].includes(role)) throw new Error("Choose a valid school role.");
+  const allowed = role === "student" ? studentPermissionKeys : teacherPermissionKeys;
+  const safePermissions = [...new Set((Array.isArray(permissions) ? permissions : []).filter((key) => allowed.has(key)))];
+  if (role === "school_admin") safePermissions.push("invite_and_manage_accounts", "post_homework", "review_student_submissions", "view_student_grades", "grade_student_work", "edit_shared_homework");
+  if (role === "student" && !safePermissions.length) throw new Error("Select at least one student permission.");
+  if (role === "teacher" && !safePermissions.length) throw new Error("Select at least one teacher permission.");
+  await client.query(
+    `UPDATE school_invites SET expires_at = now()
+     WHERE school_id = $1 AND lower(email) = $2 AND role = $3 AND accepted_at IS NULL AND expires_at > now()`,
+    [schoolId, normalizedEmail, role]
+  );
+  const token = randomBytes(32).toString("base64url");
+  const result = await client.query(
+    `INSERT INTO school_invites (school_id, email, role, permissions, token_hash, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, role, expires_at`,
+    [schoolId, normalizedEmail, role, safePermissions, hashInviteToken(token), createdBy || null]
+  );
+  return { invite: result.rows[0], inviteUrl: inviteUrl(token) };
+}
+
+async function getSchoolMember(client, userId) {
+  const result = await client.query(
+    `SELECT m.school_id, m.user_id, m.email, m.display_name, m.role, m.permissions, m.active,
+            s.name AS school_name, s.domain AS school_domain
+     FROM school_members m JOIN schools s ON s.id = m.school_id
+     WHERE m.user_id = $1 AND m.active = true LIMIT 1`, [userId]
+  );
+  return result.rows[0] || null;
+}
+
+async function requireSchoolMember(client, identity, schoolId = null) {
+  if (!identity) throw new Error("Please sign in to continue.");
+  const member = await getSchoolMember(client, identity.id);
+  if (!member) throw new Error("This account is not part of a verified school. Ask your school administrator for an invitation.");
+  if (schoolId && member.school_id !== schoolId) throw new Error("That school does not match your account.");
+  return member;
+}
+
+function requirePermission(member, permission) {
+  if (member.role === "school_admin" || member.permissions?.includes(permission)) return;
+  throw new Error("Your school account does not have permission to do that. Ask your school administrator.");
+}
+
+async function notify(client, recipientId, schoolId, kind, title, body, targetId = null) {
+  if (!recipientId) return;
+  await client.query(
+    `INSERT INTO school_notifications (recipient_id, school_id, kind, title, body, target_id)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [recipientId, schoolId, kind, title, body, targetId]
+  );
+}
+
+async function schoolContext(client, identity) {
+  const member = await getSchoolMember(client, identity.id);
+  const pendingResult = member ? { rows: [] } : await client.query(
+    `SELECT school_name, status FROM school_applications WHERE lower(contact_email) = $1 ORDER BY created_at DESC LIMIT 1`,
+    [identity.email]
+  );
+  const notifications = member ? (await client.query(
+    `SELECT id, kind, title, body, target_id, read_at, created_at FROM school_notifications
+     WHERE recipient_id = $1 AND school_id = $2 ORDER BY created_at DESC LIMIT 50`, [identity.id, member.school_id]
+  )).rows : [];
+  if (!member) return { member: null, pendingApplication: pendingResult.rows[0] || null, notifications: [], assignments: [], teachers: [] };
+
+  const assignmentQuery = member.role === "student" && !member.permissions.includes("view_homework")
+    ? { rows: [] }
+    : member.role === "student"
+    ? await client.query(`SELECT a.* FROM school_assignments a WHERE a.school_id = $1 ORDER BY a.created_at DESC`, [member.school_id])
+    : member.role === "school_admin"
+      ? await client.query(`SELECT a.* FROM school_assignments a WHERE a.school_id = $1 ORDER BY a.created_at DESC`, [member.school_id])
+      : await client.query(
+        `SELECT DISTINCT a.* FROM school_assignments a LEFT JOIN assignment_teachers t ON t.assignment_id = a.id
+         WHERE a.school_id = $1 AND (a.created_by = $2 OR t.user_id = $2) ORDER BY a.created_at DESC`,
+        [member.school_id, identity.id]
+      );
+  const assignments = [];
+  for (const assignment of assignmentQuery.rows) {
+    const teacherRows = await client.query("SELECT user_id FROM assignment_teachers WHERE assignment_id = $1 ORDER BY user_id", [assignment.id]);
+    const teacherIds = teacherRows.rows.map((row) => row.user_id);
+    const item = { ...assignment, teacher_ids: teacherIds, comments: [], submissions: [], own_submission: null };
+    if (member.role === "student") {
+      const own = await client.query("SELECT * FROM assignment_submissions WHERE assignment_id = $1 AND student_id = $2", [assignment.id, identity.id]);
+      item.own_submission = own.rows[0] || null;
+      if (item.own_submission) {
+        item.comments = (await client.query("SELECT * FROM assignment_comments WHERE submission_id = $1 ORDER BY created_at ASC", [item.own_submission.id])).rows;
+      }
+    } else if (member.role === "school_admin" || teacherIds.includes(identity.id) || assignment.created_by === identity.id) {
+      const submissions = await client.query(
+        `SELECT sub.*, m.display_name AS student_name FROM assignment_submissions sub
+         LEFT JOIN school_members m ON m.user_id = sub.student_id AND m.school_id = $2
+         WHERE sub.assignment_id = $1 ORDER BY sub.submitted_at DESC`, [assignment.id, member.school_id]
+      );
+      item.submissions = submissions.rows;
+      for (const submission of item.submissions) {
+        const comments = await client.query("SELECT * FROM assignment_comments WHERE submission_id = $1 ORDER BY created_at ASC", [submission.id]);
+        item.comments.push(...comments.rows);
+      }
+    }
+    assignments.push(item);
+  }
+  const teachers = (await client.query(
+    `SELECT user_id, email, display_name, role FROM school_members WHERE school_id = $1 AND active = true AND role IN ('teacher', 'school_admin') ORDER BY display_name`,
+    [member.school_id]
+  )).rows;
+  return { member, pendingApplication: null, notifications, assignments, teachers };
+}
+
+async function handleSchoolAction(identity, body) {
+  const action = body.action;
+  if (action === "apply") {
+    const schoolName = cleanText(body.schoolName, 160, "School name");
+    const website = cleanText(body.website, 250, "School website");
+    let parsed;
+    try { parsed = new URL(website); } catch { throw new Error("Enter a valid school website URL."); }
+    if (!/^https?:$/.test(parsed.protocol)) throw new Error("School website must use HTTPS or HTTP.");
+    const contactEmail = cleanText(body.contactEmail, 254, "Contact email").toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) throw new Error("Enter a valid contact email.");
+    const result = await pool.query(
+      `INSERT INTO school_applications (school_name, school_domain, website, address, contact_name, contact_email, verification_details)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [schoolName, parsed.hostname.replace(/^www\./, "").toLowerCase(), parsed.toString(), cleanText(body.address, 400, "School address"), cleanText(body.contactName, 120, "Contact name"), contactEmail, cleanText(body.verificationDetails, 2000, "Verification details")]
+    );
+    return { ok: true, applicationId: result.rows[0].id };
+  }
+  if (!identity) throw new Error("Please sign in to continue.");
+
+  if (action === "context") return schoolContext(pool, identity);
+
+  if (action === "admin-list") {
+    if (!isSchoolAdmin(identity)) throw new Error("Only the StudyGroup administrator can review school applications.");
+    const [applications, notifications] = await Promise.all([
+      pool.query("SELECT * FROM school_applications ORDER BY created_at DESC LIMIT 100"),
+      pool.query("SELECT * FROM school_notifications WHERE recipient_email = $1 ORDER BY created_at DESC LIMIT 50", [schoolAdminEmail])
+    ]);
+    return { applications: applications.rows, notifications: notifications.rows };
+  }
+
+  if (action === "review") {
+    if (!isSchoolAdmin(identity)) throw new Error("Only the StudyGroup administrator can review school applications.");
+    if (!["approve", "decline"].includes(body.decision)) throw new Error("Choose approve or decline.");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const found = await client.query("SELECT * FROM school_applications WHERE id = $1 FOR UPDATE", [body.applicationId]);
+      const application = found.rows[0];
+      if (!application) throw new Error("School application not found.");
+      if (application.status !== "pending") throw new Error("This application has already been reviewed.");
+      if (body.decision === "decline") {
+        await client.query("UPDATE school_applications SET status = 'declined', reviewer_id = $2, reviewed_at = now() WHERE id = $1", [application.id, identity.id]);
+        await client.query("COMMIT");
+        return { ok: true, status: "declined" };
+      }
+      const school = await client.query(
+        `INSERT INTO schools (name, domain, website, address) VALUES ($1, $2, $3, $4) RETURNING id`,
+        [application.school_name, application.school_domain, application.website, application.address]
+      );
+      await client.query("UPDATE school_applications SET status = 'approved', school_id = $2, reviewer_id = $3, reviewed_at = now() WHERE id = $1", [application.id, school.rows[0].id, identity.id]);
+      const created = await createSchoolInvite(client, { schoolId: school.rows[0].id, email: application.contact_email, role: "school_admin", permissions: [], createdBy: identity.id });
+      await client.query("COMMIT");
+      return { ok: true, status: "approved", invite: created.invite, inviteEmail: created.invite.email, inviteUrl: created.inviteUrl };
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  if (action === "create-admin-invite") {
+    if (!isSchoolAdmin(identity)) throw new Error("Only the StudyGroup administrator can create school admin invites.");
+    const application = await pool.query("SELECT * FROM school_applications WHERE id = $1 AND status = 'approved' AND school_id IS NOT NULL", [body.applicationId]);
+    if (!application.rowCount) throw new Error("An approved school application is required.");
+    const created = await createSchoolInvite(pool, { schoolId: application.rows[0].school_id, email: application.rows[0].contact_email, role: "school_admin", permissions: [], createdBy: identity.id });
+    return { ...created, inviteEmail: created.invite.email };
+  }
+
+  if (action === "accept-invite") {
+    const token = cleanText(body.token, 200, "Invitation token");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `SELECT i.*, s.name AS school_name FROM school_invites i JOIN schools s ON s.id = i.school_id
+         WHERE i.token_hash = $1 AND i.accepted_at IS NULL AND i.expires_at > now() FOR UPDATE`, [hashInviteToken(token)]
+      );
+      const invite = result.rows[0];
+      if (!invite) throw new Error("This invitation is invalid, expired or already used. Ask your school for a new link.");
+      if (invite.email.toLowerCase() !== identity.email.toLowerCase()) throw new Error(`This invitation was sent to ${invite.email}. Sign in with that email address.`);
+      const existingMember = await client.query("SELECT school_id, active FROM school_members WHERE user_id = $1", [identity.id]);
+      if (existingMember.rowCount && existingMember.rows[0].active && existingMember.rows[0].school_id !== invite.school_id) {
+        throw new Error("This account already belongs to another active school. Contact support if your school membership needs to be transferred.");
+      }
+      const displayName = cleanText(body.displayName || identity.email.split("@")[0], 100, "Display name");
+      await client.query(
+        `INSERT INTO school_members (school_id, user_id, email, display_name, role, permissions)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (user_id) DO UPDATE SET school_id = EXCLUDED.school_id, email = EXCLUDED.email,
+           display_name = EXCLUDED.display_name, role = EXCLUDED.role, permissions = EXCLUDED.permissions, active = true`,
+        [invite.school_id, identity.id, identity.email, displayName, invite.role, invite.permissions]
+      );
+      await client.query("UPDATE school_invites SET accepted_by = $2, accepted_at = now() WHERE id = $1", [invite.id, identity.id]);
+      await notify(client, identity.id, invite.school_id, "welcome", "Welcome to your school workspace", `You joined ${invite.school_name} as a ${invite.role.replace("_", " ")}.`);
+      await client.query("COMMIT");
+      return { ok: true, schoolName: invite.school_name, role: invite.role };
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  if (action === "invite-member") {
+    const member = await requireSchoolMember(pool, identity, body.schoolId);
+    requirePermission(member, "invite_and_manage_accounts");
+    if (body.role === "school_admin") throw new Error("Only the StudyGroup administrator can issue school admin invitations.");
+    return createSchoolInvite(pool, { schoolId: member.school_id, email: body.email, role: body.role, permissions: body.permissions, createdBy: identity.id });
+  }
+
+  if (action === "create-assignment") {
+    const member = await requireSchoolMember(pool, identity, body.schoolId);
+    requirePermission(member, "post_homework");
+    if (!(["teacher", "school_admin"].includes(member.role))) throw new Error("Only teachers can post homework.");
+    const title = cleanText(body.title, 180, "Homework title");
+    const subject = cleanText(body.subject, 80, "Subject");
+    const instructions = cleanText(body.instructions, 5000, "Instructions");
+    const dueAt = body.dueAt ? new Date(body.dueAt) : null;
+    if (dueAt && Number.isNaN(dueAt.getTime())) throw new Error("Choose a valid due date.");
+    if (body.attachment && (!String(body.attachment.publicId || "").startsWith(`studygroup/schools/${member.school_id}/teacher-homework/`) || body.attachment.resourceType !== "raw")) throw new Error("The homework attachment was not uploaded through the secure school upload flow.");
+    const teacherIds = [...new Set([identity.id, ...(Array.isArray(body.teacherIds) ? body.teacherIds : [])])];
+    const validTeachers = await pool.query(
+      "SELECT user_id FROM school_members WHERE school_id = $1 AND user_id = ANY($2::text[]) AND role IN ('teacher', 'school_admin') AND active = true",
+      [member.school_id, teacherIds]
+    );
+    if (validTeachers.rowCount !== teacherIds.length) throw new Error("One of the selected co-teachers is not an active teacher at this school.");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const created = await client.query(
+        `INSERT INTO school_assignments (school_id, title, subject, instructions, due_at, attachment, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7) RETURNING id`,
+        [member.school_id, title, subject, instructions, dueAt, body.attachment ? JSON.stringify(body.attachment) : null, identity.id]
+      );
+      for (const teacherId of teacherIds) await client.query("INSERT INTO assignment_teachers (assignment_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [created.rows[0].id, teacherId]);
+      await client.query(
+        `INSERT INTO school_notifications (recipient_id, school_id, kind, title, body, target_id)
+         SELECT user_id, $1, 'homework', $2, $3, $4 FROM school_members WHERE school_id = $1 AND role = 'student' AND active = true`,
+        [member.school_id, `New ${subject} homework`, title, created.rows[0].id]
+      );
+      await client.query("COMMIT");
+      return { ok: true, assignmentId: created.rows[0].id };
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  if (action === "update-assignment") {
+    const member = await requireSchoolMember(pool, identity);
+    requirePermission(member, "edit_shared_homework");
+    if (!["teacher", "school_admin"].includes(member.role)) throw new Error("Only teachers can edit school homework.");
+    const title = cleanText(body.title, 180, "Homework title");
+    const subject = cleanText(body.subject, 80, "Subject");
+    const instructions = cleanText(body.instructions, 5000, "Instructions");
+    const dueAt = body.dueAt ? new Date(body.dueAt) : null;
+    if (dueAt && Number.isNaN(dueAt.getTime())) throw new Error("Choose a valid due date.");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const found = await client.query("SELECT * FROM school_assignments WHERE id = $1 AND school_id = $2 FOR UPDATE", [body.assignmentId, member.school_id]);
+      const assignment = found.rows[0];
+      if (!assignment) throw new Error("Homework not found in your school.");
+      const assigned = await client.query("SELECT 1 FROM assignment_teachers WHERE assignment_id = $1 AND user_id = $2", [assignment.id, identity.id]);
+      if (member.role !== "school_admin" && !assigned.rowCount && assignment.created_by !== identity.id) throw new Error("You are not assigned to edit this homework.");
+      await client.query("UPDATE school_assignments SET title = $2, subject = $3, instructions = $4, due_at = $5 WHERE id = $1", [assignment.id, title, subject, instructions, dueAt]);
+      await client.query(
+        `INSERT INTO school_notifications (recipient_id, school_id, kind, title, body, target_id)
+         SELECT user_id, $1, 'homework_update', 'Homework updated', $2, $3 FROM school_members WHERE school_id = $1 AND role = 'student' AND active = true`,
+        [member.school_id, `${title} has been updated by your teacher.`, assignment.id]
+      );
+      await client.query("COMMIT");
+      return { ok: true };
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  if (action === "submit-assignment") {
+    const member = await requireSchoolMember(pool, identity);
+    if (member.role !== "student") throw new Error("Only student accounts can submit homework.");
+    requirePermission(member, "upload_submissions");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const assignment = await client.query("SELECT * FROM school_assignments WHERE id = $1 AND school_id = $2", [body.assignmentId, member.school_id]);
+      if (!assignment.rowCount) throw new Error("This homework does not belong to your school.");
+      if (body.attachment && (!String(body.attachment.publicId || "").startsWith(`studygroup/schools/${member.school_id}/student-submission/`) || body.attachment.resourceType !== "raw")) throw new Error("The submission attachment was not uploaded through the secure school upload flow.");
+      const textAnswer = String(body.textAnswer || "").trim();
+      if (textAnswer.length > 10000) throw new Error("Your written answer is too long.");
+      if (!textAnswer && !body.attachment) throw new Error("Write an answer or attach a file before submitting.");
+      const saved = await client.query(
+        `INSERT INTO assignment_submissions (assignment_id, student_id, text_answer, attachment, submitted_at)
+         VALUES ($1, $2, $3, $4::jsonb, now())
+         ON CONFLICT (assignment_id, student_id) DO UPDATE SET text_answer = EXCLUDED.text_answer,
+           attachment = COALESCE(EXCLUDED.attachment, assignment_submissions.attachment), submitted_at = now(), grade = NULL, grade_feedback = '', graded_by = NULL, graded_at = NULL
+         RETURNING id`,
+        [body.assignmentId, identity.id, textAnswer, body.attachment ? JSON.stringify(body.attachment) : null]
+      );
+      const teachers = await client.query("SELECT user_id FROM assignment_teachers WHERE assignment_id = $1", [body.assignmentId]);
+      for (const teacher of teachers.rows) await notify(client, teacher.user_id, member.school_id, "submission", "A student submitted homework", `${member.display_name} submitted ${assignment.rows[0].title}.`, saved.rows[0].id);
+      await client.query("COMMIT");
+      return { ok: true, submissionId: saved.rows[0].id };
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  if (action === "comment") {
+    const member = await requireSchoolMember(pool, identity);
+    const bodyText = cleanText(body.body, 2000, "Comment");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `SELECT sub.*, a.school_id, a.title, a.created_by FROM assignment_submissions sub
+         JOIN school_assignments a ON a.id = sub.assignment_id WHERE sub.id = $1 FOR UPDATE`, [body.submissionId]
+      );
+      const submission = result.rows[0];
+      if (!submission || submission.school_id !== member.school_id) throw new Error("Submission not found in your school.");
+      const teacherRows = await client.query("SELECT user_id FROM assignment_teachers WHERE assignment_id = $1", [submission.assignment_id]);
+      const teacherIds = teacherRows.rows.map((row) => row.user_id);
+      const isStudentOwner = member.role === "student" && submission.student_id === identity.id && member.permissions.includes("comment_privately_to_teachers");
+      const isAssignedTeacher = ["teacher", "school_admin"].includes(member.role) && (member.role === "school_admin" || teacherIds.includes(identity.id) || submission.created_by === identity.id);
+      if (!isStudentOwner && !isAssignedTeacher) throw new Error("Only this student and the homework's assigned teachers can comment.");
+      const inserted = await client.query("INSERT INTO assignment_comments (submission_id, author_id, body) VALUES ($1, $2, $3) RETURNING id", [submission.id, identity.id, bodyText]);
+      const recipients = isStudentOwner ? teacherIds : [submission.student_id];
+      for (const recipient of recipients) await notify(client, recipient, member.school_id, "comment", "New private homework comment", `${member.display_name} commented on ${submission.title}.`, inserted.rows[0].id);
+      await client.query("COMMIT");
+      return { ok: true, commentId: inserted.rows[0].id };
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  if (action === "grade-submission") {
+    const member = await requireSchoolMember(pool, identity);
+    requirePermission(member, "grade_student_work");
+    if (!["teacher", "school_admin"].includes(member.role)) throw new Error("Only teachers can grade submissions.");
+    const grade = Number(body.grade);
+    if (!Number.isFinite(grade) || grade < 0 || grade > 100) throw new Error("Enter a grade between 0 and 100.");
+    const feedback = String(body.feedback || "").trim();
+    if (feedback.length > 2000) throw new Error("Feedback must be 2,000 characters or fewer.");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `SELECT sub.id, sub.student_id, a.school_id, a.created_by, a.title FROM assignment_submissions sub
+         JOIN school_assignments a ON a.id = sub.assignment_id WHERE sub.id = $1 FOR UPDATE`, [body.submissionId]
+      );
+      const submission = result.rows[0];
+      if (!submission || submission.school_id !== member.school_id) throw new Error("Submission not found in your school.");
+      const assigned = await client.query("SELECT 1 FROM assignment_teachers WHERE assignment_id = (SELECT assignment_id FROM assignment_submissions WHERE id = $1) AND user_id = $2", [submission.id, identity.id]);
+      if (member.role !== "school_admin" && !assigned.rowCount && submission.created_by !== identity.id) throw new Error("You are not assigned to grade this homework.");
+      await client.query("UPDATE assignment_submissions SET grade = $2, grade_feedback = $3, graded_by = $4, graded_at = now() WHERE id = $1", [submission.id, grade, feedback, identity.id]);
+      await notify(client, submission.student_id, member.school_id, "grade", "Your homework has been graded", `${submission.title}: ${grade}%${feedback ? ` · ${feedback}` : ""}.`, submission.id);
+      await client.query("COMMIT");
+      return { ok: true };
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  if (action === "mark-notification-read") {
+    const result = await pool.query("UPDATE school_notifications SET read_at = now() WHERE id = $1 AND recipient_id = $2 RETURNING id", [body.notificationId, identity.id]);
+    if (!result.rowCount) throw new Error("Notification not found.");
+    return { ok: true };
+  }
+
+  if (action === "file-url") {
+    const member = await requireSchoolMember(pool, identity);
+    let attachment = null;
+    if (body.kind === "assignment") {
+      const result = await pool.query("SELECT attachment FROM school_assignments WHERE id = $1 AND school_id = $2", [body.resourceId, member.school_id]);
+      attachment = result.rows[0]?.attachment;
+    } else if (body.kind === "submission") {
+      const result = await pool.query(
+        `SELECT sub.attachment, sub.student_id, a.school_id, a.created_by, a.id AS assignment_id FROM assignment_submissions sub
+         JOIN school_assignments a ON a.id = sub.assignment_id WHERE sub.id = $1 AND a.school_id = $2`, [body.resourceId, member.school_id]
+      );
+      const submission = result.rows[0];
+      if (submission) {
+        const assigned = await pool.query("SELECT 1 FROM assignment_teachers WHERE assignment_id = $1 AND user_id = $2", [submission.assignment_id, identity.id]);
+        const allowed = member.role === "school_admin" || submission.student_id === identity.id || assigned.rowCount || submission.created_by === identity.id;
+        if (allowed) attachment = submission.attachment;
+      }
+    }
+    if (!attachment?.publicId) throw new Error("File not found or you do not have permission to access it.");
+    const url = cloudinary.utils.private_download_url(attachment.publicId, attachment.format || "bin", {
+      resource_type: attachment.resourceType || "raw", type: "authenticated", expires_at: Math.floor(Date.now() / 1000) + 300
+    });
+    return { url };
+  }
+
+  throw new Error("Unknown school workspace action.");
+}
+
+async function cloudinarySignature(identity, body) {
+  if (!identity) throw new Error("Please sign in before uploading a file.");
+  const member = await requireSchoolMember(pool, identity, body.schoolId);
+  if (body.purpose === "teacher-homework") {
+    requirePermission(member, "post_homework");
+    if (!["teacher", "school_admin"].includes(member.role)) throw new Error("Only teachers can upload homework files.");
+  } else if (body.purpose === "student-submission") {
+    requirePermission(member, "upload_submissions");
+    if (member.role !== "student") throw new Error("Only students can upload submission files.");
+  } else throw new Error("Unknown school upload purpose.");
+  const timestamp = Math.floor(Date.now() / 1000);
+  const params = {
+    timestamp,
+    folder: `studygroup/schools/${member.school_id}/${body.purpose}`,
+    type: "authenticated",
+    upload_preset: uploadPreset,
+    unique_filename: true,
+    overwrite: false
+  };
+  return {
+    cloudName,
+    apiKey: cloudApiKey,
+    resourceType: "raw",
+    params,
+    signature: cloudinary.utils.api_sign_request(params, cloudApiSecret)
+  };
+}
+
 const server = createServer(async (request, response) => {
   const origin = requestOrigin(request) || frontendOrigin;
   if (request.method === "OPTIONS") {
@@ -560,37 +1005,17 @@ const server = createServer(async (request, response) => {
 
     if (url.pathname === "/api/schools") {
       if (request.method !== "POST") throw new Error("Method not allowed.");
-      
       const body = await readJson(request);
-      
-      if (!identity && !body.anonymous) {
-        sendJson(response, 401, { error: "Please sign in to continue." }, origin);
-        return;
-      }
+      const result = await handleSchoolAction(identity, body);
+      sendJson(response, 200, result, origin);
+      return;
+    }
 
-      const action = body.action;
-
-      if (action === "submitApplication") {
-        await pool.query(
-          `INSERT INTO school_applications 
-           (school_name, school_domain, website, address, contact_name, contact_email, verification_details) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            body.schoolName,
-            body.schoolDomain,
-            body.website,
-            body.address,
-            body.contactName,
-            identity?.email || body.contactEmail,
-            body.verificationDetails
-          ]
-        );
-
-        sendJson(response, 200, { ok: true, message: "School application submitted successfully." }, origin);
-        return;
-      }
-
-      sendJson(response, 200, { ok: true }, origin);
+    if (url.pathname === "/api/cloudinary/signature") {
+      if (request.method !== "POST") throw new Error("Method not allowed.");
+      const body = await readJson(request);
+      const result = await cloudinarySignature(identity, body);
+      sendJson(response, 200, result, origin);
       return;
     }
 

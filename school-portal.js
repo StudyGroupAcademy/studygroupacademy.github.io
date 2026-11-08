@@ -8,7 +8,8 @@ const teacherPermissions = [
   ["edit_shared_homework", "Work on shared homework"],
   ["review_student_submissions", "Review submissions and private comments"],
   ["invite_and_manage_accounts", "Invite and manage accounts"],
-  ["view_student_grades", "View student grades"]
+  ["view_student_grades", "View student grades"],
+  ["grade_student_work", "Grade student work and leave feedback"]
 ];
 const studentPermissions = [
   ["view_homework", "View homework"],
@@ -40,7 +41,7 @@ function renderPermissions() {
   const role = $("#school-invite-form").elements.role.value;
   const permissions = role === "teacher" ? teacherPermissions : studentPermissions;
   $("#invite-permissions").innerHTML = permissions.map(([key, title]) => {
-    const checked = role === "student" || ["post_homework", "edit_shared_homework", "review_student_submissions"].includes(key);
+    const checked = role === "student" || ["post_homework", "edit_shared_homework", "review_student_submissions", "grade_student_work"].includes(key);
     return `<label class="permission-option"><input type="checkbox" name="permissions" value="${key}" ${checked ? "checked" : ""}><span>${title}</span></label>`;
   }).join("");
 }
@@ -113,8 +114,11 @@ function renderStudentSubmission(assignment) {
   const submittedFile = submission?.attachment
     ? fileButton("submission", submission.id, `Download your work (${submission.attachment.originalFilename || "file"})`)
     : "";
+  const grade = submission?.grade !== null && submission?.grade !== undefined && context.member.permissions.includes("view_feedback_and_grades")
+    ? `<div class="school-grade-result"><strong>${escapeHtml(submission.grade)}%</strong><span>${escapeHtml(submission.grade_feedback || "Your teacher has graded this work.")}</span></div>`
+    : "";
   const existing = submission
-    ? `<div class="school-submission"><strong>Handed in ${escapeHtml(formatDate(submission.submitted_at, true))}</strong>${submission.text_answer ? `<p>${escapeHtml(submission.text_answer)}</p>` : ""}${submittedFile}${comments}</div>`
+    ? `<div class="school-submission"><strong>Handed in ${escapeHtml(formatDate(submission.submitted_at, true))}</strong>${submission.text_answer ? `<p>${escapeHtml(submission.text_answer)}</p>` : ""}${submittedFile}${grade}${comments}</div>`
     : "";
   const canSubmit = context.member.permissions.includes("upload_submissions");
   return `${existing}${canSubmit ? `<form class="school-submission-form" data-school-submit="${escapeHtml(assignment.id)}">
@@ -129,9 +133,11 @@ function renderTeacherSubmissions(assignment) {
   if (!canReview) return "";
   if (!assignment.submissions.length) return '<p class="form-hint">No student submissions yet.</p>';
   return `<div class="school-submissions">${assignment.submissions.map((submission) => `
-    <section class="school-submission"><strong>Student work · ${escapeHtml(formatDate(submission.submitted_at, true))}</strong>
+    <section class="school-submission"><strong>${escapeHtml(submission.student_name || "Student")} · ${escapeHtml(formatDate(submission.submitted_at, true))}</strong>
       ${submission.text_answer ? `<p>${escapeHtml(submission.text_answer)}</p>` : ""}
       ${submission.attachment ? fileButton("submission", submission.id, `Download submitted file (${submission.attachment.originalFilename || "file"})`) : ""}
+      ${submission.grade !== null && submission.grade !== undefined && (context.member.permissions.includes("view_student_grades") || context.member.permissions.includes("grade_student_work") || context.member.role === "school_admin") ? `<div class="school-grade-result"><strong>${escapeHtml(submission.grade)}%</strong><span>${escapeHtml(submission.grade_feedback || "No written feedback")}</span></div>` : ""}
+      ${context.member.permissions.includes("grade_student_work") || context.member.role === "school_admin" ? `<form class="school-grade-form" data-school-grade="${escapeHtml(submission.id)}"><label>Grade (%)<input name="grade" type="number" min="0" max="100" step="0.5" value="${submission.grade ?? ""}" required></label><label>Feedback<textarea name="feedback" maxlength="2000" placeholder="What went well? What should improve?">${escapeHtml(submission.grade_feedback || "")}</textarea></label><button class="button button-light" type="submit">Save grade and feedback</button></form>` : ""}
       ${renderComments(assignment.comments, submission.id, context.member.role === "teacher" && assignment.teacher_ids.includes(currentUser.uid))}
     </section>`).join("")}</div>`;
 }
@@ -151,8 +157,11 @@ function renderAssignments(assignments = []) {
       ? fileButton("assignment", assignment.id, `Download instructions (${assignment.attachment.originalFilename || "file"})`)
       : "";
     const activity = member.role === "student" ? renderStudentSubmission(assignment) : renderTeacherSubmissions(assignment);
+    const canEdit = member.role === "school_admin" || (member.permissions.includes("edit_shared_homework") && assignment.teacher_ids?.includes(currentUser.uid));
+    const dueValue = assignment.due_at ? new Date(assignment.due_at).toISOString().slice(0, 16) : "";
+    const editForm = canEdit ? `<details class="school-edit-details"><summary>Edit shared homework</summary><form class="school-edit-form" data-school-edit="${escapeHtml(assignment.id)}"><label>Title<input name="title" maxlength="180" value="${escapeHtml(assignment.title)}" required></label><label>Subject<input name="subject" maxlength="80" value="${escapeHtml(assignment.subject)}" required></label><label>Instructions<textarea name="instructions" maxlength="5000" required>${escapeHtml(assignment.instructions)}</textarea></label><label>Due date and time<input name="dueAt" type="datetime-local" value="${escapeHtml(dueValue)}"></label><button class="button button-light" type="submit">Save changes</button></form></details>` : "";
     return `<article class="school-assignment"><div class="school-assignment-heading"><span class="school-subject">${escapeHtml(assignment.subject)}</span><span>${escapeHtml(due)}</span></div>
-      <h4>${escapeHtml(assignment.title)}</h4><p>${escapeHtml(assignment.instructions)}</p><div class="school-file-row">${attached}<small>${escapeHtml(teachers)}</small></div>${activity}</article>`;
+      <h4>${escapeHtml(assignment.title)}</h4><p>${escapeHtml(assignment.instructions)}</p><div class="school-file-row">${attached}<small>${escapeHtml(teachers)}</small></div>${editForm}${activity}</article>`;
   }).join("");
 }
 
@@ -192,12 +201,8 @@ function configureMember(member) {
   $("#school-invite-section").hidden = !isSchoolAccount ||
     (member.role !== "school_admin" && !member.permissions.includes("invite_and_manage_accounts"));
   $("#school-assignment-create").hidden = !isSchoolAccount ||
-    (member.role !== "teacher" || !member.permissions.includes("post_homework"));
+    (!['teacher', 'school_admin'].includes(member.role) || (member.role !== "school_admin" && !member.permissions.includes("post_homework")));
   if (isSchoolAccount && ["student", "teacher", "school_admin"].includes(member.role)) {
-    $$("[data-tab]").forEach((tab) => {
-      const schoolWorkspaceTab = ["school", "planner"].includes(tab.dataset.tab);
-      tab.hidden = !schoolWorkspaceTab;
-    });
     $('[data-tab="school"]').click();
   }
 }
@@ -313,6 +318,36 @@ async function handleSubmit(event) {
       return;
     }
 
+    if (form.matches("[data-school-edit]")) {
+      event.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      button.disabled = true;
+      await schoolRequest("update-assignment", {
+        assignmentId: form.dataset.schoolEdit,
+        title: form.elements.title.value,
+        subject: form.elements.subject.value,
+        instructions: form.elements.instructions.value,
+        dueAt: form.elements.dueAt.value ? new Date(form.elements.dueAt.value).toISOString() : null
+      });
+      await loadSchoolContext();
+      setStatus("Shared homework updated successfully.");
+      return;
+    }
+
+    if (form.matches("[data-school-grade]")) {
+      event.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      button.disabled = true;
+      await schoolRequest("grade-submission", {
+        submissionId: form.dataset.schoolGrade,
+        grade: form.elements.grade.value,
+        feedback: form.elements.feedback.value
+      });
+      await loadSchoolContext();
+      setStatus("Grade and feedback saved. The student has been notified.");
+      return;
+    }
+
     if (form.matches("[data-school-comment]")) {
       event.preventDefault();
       const body = form.elements.body.value.trim();
@@ -353,7 +388,7 @@ async function handleClick(event) {
       reissue.disabled = true;
       const result = await schoolRequest("create-admin-invite", { applicationId: reissue.dataset.schoolAdminInvite });
       const output = $(`#school-review-result-${CSS.escape(reissue.dataset.schoolAdminInvite)}`);
-      output.innerHTML = `<p>Send this new school admin invite to ${escapeHtml(result.inviteEmail)} (it expires in 14 days):</p><p><a href="${escapeHtml(result.inviteUrl)}">${escapeHtml(result.inviteUrl)}</a></p>`;
+      output.innerHTML = `<p>Send this new school admin invite to ${escapeHtml(result.inviteEmail || result.invite?.email)} (it expires in 14 days):</p><p><a href="${escapeHtml(result.inviteUrl)}">${escapeHtml(result.inviteUrl)}</a></p>`;
       return;
     }
     if (file) {

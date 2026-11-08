@@ -4,6 +4,7 @@ import { $, $$, db, state, showBanner } from "./core.js";
 import { ensureUserProfile, saveDailyGoal, saveProfileChoices, takeWelcomeFlag } from "./session.js";
 import { computeBadges, computeStats, consumeOAuthCallback, describeOAuthError } from "./helpers.js";
 import { initResourceFilter, setLessonUser } from "./resources.js";
+import { initSchoolPortal, startSchoolPortal } from "./school-portal.js";
 
 const DEFAULT_SUBJECTS = ["Maths", "English", "Science", "Computer Science", "History", "Geography", "French", "Spanish"];
 
@@ -34,6 +35,7 @@ export async function initDashboard() {
   bindNoteActions();
   bindGroupActions();
   bindSchoolActions();
+  initSchoolPortal();
   
   const welcomePending = takeWelcomeFlag();
   const oauthCallback = consumeOAuthCallback();
@@ -85,6 +87,11 @@ async function handleSignedInUser(user) {
   populateSubjectDropdowns();
   setLessonUser(user);
   initResourceFilter();
+  try {
+    await startSchoolPortal(currentUser, profile);
+  } catch (error) {
+    console.error("The school workspace could not be started.", error);
+  }
   try {
     await loadAllPanelData();
   } catch (error) {

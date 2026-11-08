@@ -1365,3 +1365,13 @@ body { font-size: 16px; line-height: 1.55; }
   .lesson-player-header h2 { font-size: 15px; }
   .lesson-player-controls { padding: 11px; }
 }
+
+.school-edit-details { border-top: 1px solid #eeece6; padding-top: 10px; }
+.school-edit-details summary { color: #526c58; font-size: 12px; font-weight: 700; cursor: pointer; }
+.school-edit-form, .school-grade-form { display: grid; gap: 10px; margin-top: 10px; padding: 12px; border: 1px solid #e8e6df; border-radius: 8px; background: #faf9f6; }
+.school-edit-form label, .school-grade-form label { display: grid; gap: 5px; color: #55554e; font-size: 12px; font-weight: 650; }
+.school-edit-form input, .school-edit-form textarea, .school-grade-form input, .school-grade-form textarea { width: 100%; min-width: 0; border: 1px solid #e2e0d8; border-radius: 6px; padding: 9px 10px; background: #fff; color: #292923; font: inherit; }
+.school-edit-form textarea, .school-grade-form textarea { min-height: 78px; resize: vertical; }
+.school-grade-result { display: flex; align-items: flex-start; gap: 10px; border: 1px solid #e5eadf; border-radius: 8px; padding: 10px 12px; background: #f5f8f1; }
+.school-grade-result strong { color: #3f6848; font-size: 20px; white-space: nowrap; }
+.school-grade-result span { color: #66675f; font-size: 12px; line-height: 1.6; }
