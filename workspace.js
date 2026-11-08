@@ -645,89 +645,112 @@ export async function exportData() {
   return result;
 }
 
-function bindOnce() {
+function bindOnce(selector, event, handler) {
+  const element = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!element) return;
+  element.addEventListener(event, handler);
+}
+
+export function initWorkspaceUI() {
   if (ws.bound) return;
   ws.bound = true;
   initInsights();
   initCalculator();
 
-  $$("[data-tab]").forEach((tab) => tab.addEventListener("click", () => activateTab(tab.dataset.tab)));
+  $$("[data-tab]").forEach((tab) => bindOnce(tab, "click", () => activateTab(tab.dataset.tab)));
 
-  $("#task-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (!state.user) return;
-    const form = event.currentTarget;
-    const title = form.elements.title.value.trim();
-    if (!title) return;
-    run(async () => {
-      await addDoc(userCollection("tasks"), {
-        title,
-        subject: form.elements.subject.value,
-        due: form.elements.due.value || "",
-        time: form.elements.time.value || "",
-        done: false,
-        createdAt: serverTimestamp()
-      });
-      form.elements.title.value = "";
-      form.elements.due.value = "";
-      form.elements.time.value = "";
-      form.elements.title.focus();
-    }, event.submitter);
-  });
+  const taskForm = $("#task-form");
+  if (taskForm) {
+    bindOnce(taskForm, "submit", (event) => {
+      event.preventDefault();
+      if (!state.user) return;
+      const form = event.currentTarget;
+      const title = form.elements.title.value.trim();
+      if (!title) return;
+      run(async () => {
+        await addDoc(userCollection("tasks"), {
+          title,
+          subject: form.elements.subject.value,
+          due: form.elements.due.value || "",
+          time: form.elements.time.value || "",
+          done: false,
+          createdAt: serverTimestamp()
+        });
+        form.elements.title.value = "";
+        form.elements.due.value = "";
+        form.elements.time.value = "";
+        form.elements.title.focus();
+      }, event.submitter);
+    });
+  }
 
-  $("#calendar-grid").addEventListener("click", (event) => {
-    const day = event.target.closest("[data-calendar-day]");
-    if (!day) return;
-    ws.calendarSelected = day.dataset.calendarDay;
-    const selected = new Date(`${ws.calendarSelected}T12:00:00`);
-    ws.calendarMonth = new Date(selected.getFullYear(), selected.getMonth(), 1);
-    $("#task-form").elements.due.value = ws.calendarSelected;
-    renderCalendar();
-    $("#task-form").elements.title.focus();
-  });
-  $("#calendar-prev").addEventListener("click", () => {
+  const calendarGrid = $("#calendar-grid");
+  if (calendarGrid) {
+    bindOnce(calendarGrid, "click", (event) => {
+      const day = event.target.closest("[data-calendar-day]");
+      if (!day) return;
+      ws.calendarSelected = day.dataset.calendarDay;
+      const selected = new Date(`${ws.calendarSelected}T12:00:00`);
+      ws.calendarMonth = new Date(selected.getFullYear(), selected.getMonth(), 1);
+      const dueInput = $("#task-form")?.elements?.due;
+      if (dueInput) dueInput.value = ws.calendarSelected;
+      renderCalendar();
+      const titleInput = $("#task-form")?.elements?.title;
+      if (titleInput) titleInput.focus();
+    });
+  }
+
+  bindOnce("#calendar-prev", "click", () => {
     ws.calendarMonth = new Date(ws.calendarMonth.getFullYear(), ws.calendarMonth.getMonth() - 1, 1);
     ws.calendarSelected = dateKey(ws.calendarMonth);
-    $("#task-form").elements.due.value = ws.calendarSelected;
+    const dueInput = $("#task-form")?.elements?.due;
+    if (dueInput) dueInput.value = ws.calendarSelected;
     renderCalendar();
   });
-  $("#calendar-next").addEventListener("click", () => {
+
+  bindOnce("#calendar-next", "click", () => {
     ws.calendarMonth = new Date(ws.calendarMonth.getFullYear(), ws.calendarMonth.getMonth() + 1, 1);
     ws.calendarSelected = dateKey(ws.calendarMonth);
-    $("#task-form").elements.due.value = ws.calendarSelected;
+    const dueInput = $("#task-form")?.elements?.due;
+    if (dueInput) dueInput.value = ws.calendarSelected;
     renderCalendar();
   });
-  $("#calendar-today").addEventListener("click", () => {
+
+  bindOnce("#calendar-today", "click", () => {
     const today = new Date();
     ws.calendarMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     ws.calendarSelected = dateKey(today);
-    $("#task-form").elements.due.value = ws.calendarSelected;
+    const dueInput = $("#task-form")?.elements?.due;
+    if (dueInput) dueInput.value = ws.calendarSelected;
     renderCalendar();
   });
 
-  $("#task-list").addEventListener("click", (event) => {
-    const toggle = event.target.closest("[data-task-toggle]");
-    const remove = event.target.closest("[data-task-delete]");
-    if (toggle) {
-      const task = ws.tasks.find((entry) => entry.id === toggle.dataset.taskToggle);
-      if (task) run(() => updateDoc(userDoc("tasks", task.id), { done: !task.done }));
-    } else if (remove) {
-      run(async () => {
-        const batch = writeBatch(db);
-        batch.delete(userDoc("tasks", remove.dataset.taskDelete));
-        await batch.commit();
-      });
-    }
-  });
+  const taskList = $("#task-list");
+  if (taskList) {
+    bindOnce(taskList, "click", (event) => {
+      const toggle = event.target.closest("[data-task-toggle]");
+      const remove = event.target.closest("[data-task-delete]");
+      if (toggle) {
+        const task = ws.tasks.find((entry) => entry.id === toggle.dataset.taskToggle);
+        if (task) run(() => updateDoc(userDoc("tasks", task.id), { done: !task.done }));
+      } else if (remove) {
+        run(async () => {
+          const batch = writeBatch(db);
+          batch.delete(userDoc("tasks", remove.dataset.taskDelete));
+          await batch.commit();
+        });
+      }
+    });
+  }
 
   $$("[data-task-filter]").forEach((chip) => {
-    chip.addEventListener("click", () => {
+    bindOnce(chip, "click", () => {
       ws.taskFilter = chip.dataset.taskFilter;
       renderTasks();
     });
   });
 
-  $("#clear-done").addEventListener("click", () => {
+  bindOnce("#clear-done", "click", () => {
     const finished = ws.tasks.filter((task) => task.done);
     if (finished.length === 0) return;
     run(async () => {
@@ -738,79 +761,103 @@ function bindOnce() {
     });
   });
 
-  $("#timer-toggle").addEventListener("click", () => (timer.running ? pauseTimer() : startTimer()));
-  $("#timer-reset").addEventListener("click", resetTimer);
-  $("#timer-log").addEventListener("click", (event) => run(logEarly, event.currentTarget));
+  bindOnce("#timer-toggle", "click", () => (timer.running ? pauseTimer() : startTimer()));
+  bindOnce("#timer-reset", "click", resetTimer);
+  bindOnce("#timer-log", "click", (event) => run(logEarly, event.currentTarget));
+  
   ["#focus-minutes", "#break-minutes"].forEach((selector) => {
-    $(selector).addEventListener("change", () => {
-      if (!timer.running) setMode(timer.mode);
-    });
-  });
-
-  $("#session-list").addEventListener("click", (event) => {
-    const remove = event.target.closest("[data-session-delete]");
-    if (remove) run(async () => {
-      const batch = writeBatch(db);
-      batch.delete(userDoc("sessions", remove.dataset.sessionDelete));
-      await batch.commit();
-    });
-  });
-
-  $("#deck-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (!state.user) return;
-    const form = event.currentTarget;
-    const name = form.elements.name.value.trim();
-    const { cards, skipped } = parseCards(form.elements.cards.value);
-    if (!name || name.length > 40) {
-      showToast("Give the deck a name of up to 40 characters.");
-      return;
-    }
-    if (cards.length === 0) {
-      showToast("Add at least one card as: question | answer");
-      return;
-    }
-    run(async () => {
-      await addDoc(userCollection("decks"), {
-        name,
-        subject: form.elements.subject.value,
-        cards,
-        createdAt: serverTimestamp()
+    const el = $(selector);
+    if (el) {
+      bindOnce(el, "change", () => {
+        if (!timer.running) setMode(timer.mode);
       });
-      form.reset();
-      showToast(skipped ? `Deck saved. ${skipped} ${skipped === 1 ? "line was" : "lines were"} skipped.` : "Deck saved.");
-    }, event.submitter);
+    }
   });
 
-  $("#deck-list").addEventListener("click", (event) => {
-    const studyButton = event.target.closest("[data-deck-study]");
-    const remove = event.target.closest("[data-deck-delete]");
-    if (studyButton) {
-      openStudy(studyButton.dataset.deckStudy);
-    } else if (remove && window.confirm("Delete this deck?")) {
-      run(async () => {
+  const sessionList = $("#session-list");
+  if (sessionList) {
+    bindOnce(sessionList, "click", (event) => {
+      const remove = event.target.closest("[data-session-delete]");
+      if (remove) run(async () => {
         const batch = writeBatch(db);
-        batch.delete(userDoc("decks", remove.dataset.deckDelete));
+        batch.delete(userDoc("sessions", remove.dataset.sessionDelete));
         await batch.commit();
       });
-    }
-  });
+    });
+  }
 
-  $("#study-flip").addEventListener("click", () => {
+  const deckForm = $("#deck-form");
+  if (deckForm) {
+    bindOnce(deckForm, "submit", (event) => {
+      event.preventDefault();
+      if (!state.user) return;
+      const form = event.currentTarget;
+      const name = form.elements.name.value.trim();
+      const { cards, skipped } = parseCards(form.elements.cards.value);
+      if (!name || name.length > 40) {
+        showToast("Give the deck a name of up to 40 characters.");
+        return;
+      }
+      if (cards.length === 0) {
+        showToast("Add at least one card as: question | answer");
+        return;
+      }
+      run(async () => {
+        await addDoc(userCollection("decks"), {
+          name,
+          subject: form.elements.subject.value,
+          cards,
+          createdAt: serverTimestamp()
+        });
+        form.reset();
+        showToast(skipped ? `Deck saved. ${skipped} ${skipped === 1 ? "line was" : "lines were"} skipped.` : "Deck saved.");
+      }, event.submitter);
+    });
+  }
+
+  const deckList = $("#deck-list");
+  if (deckList) {
+    bindOnce(deckList, "click", (event) => {
+      const studyButton = event.target.closest("[data-deck-study]");
+      const remove = event.target.closest("[data-deck-delete]");
+      if (studyButton) {
+        openStudy(studyButton.dataset.deckStudy);
+      } else if (remove && window.confirm("Delete this deck?")) {
+        run(async () => {
+          const batch = writeBatch(db);
+          batch.delete(userDoc("decks", remove.dataset.deckDelete));
+          await batch.commit();
+        });
+      }
+    });
+  }
+
+  bindOnce("#study-flip", "click", () => {
     study.flipped = true;
     renderStudy();
   });
-  $("#study-card").addEventListener("click", () => {
-    if (study.index >= study.queue.length) return;
-    study.flipped = !study.flipped;
-    renderStudy();
-  });
-  $("#study-again").addEventListener("click", () => gradeCard(false));
-  $("#study-good").addEventListener("click", () => gradeCard(true));
-  $("#study-restart").addEventListener("click", restartStudy);
-  $("#study-shuffle").addEventListener("change", restartStudy);
-  document.addEventListener("keydown", (event) => {
-    if (!$("#study-dialog").open) return;
+  
+  const studyCard = $("#study-card");
+  if (studyCard) {
+    bindOnce(studyCard, "click", () => {
+      if (study.index >= study.queue.length) return;
+      study.flipped = !study.flipped;
+      renderStudy();
+    });
+  }
+
+  bindOnce("#study-again", "click", () => gradeCard(false));
+  bindOnce("#study-good", "click", () => gradeCard(true));
+  bindOnce("#study-restart", "click", restartStudy);
+  
+  const studyShuffle = $("#study-shuffle");
+  if (studyShuffle) {
+    bindOnce(studyShuffle, "change", restartStudy);
+  }
+
+  bindOnce(document, "keydown", (event) => {
+    const dialog = $("#study-dialog");
+    if (!dialog || !dialog.open) return;
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       event.preventDefault();
       if (study.index < study.queue.length) {
@@ -824,190 +871,61 @@ function bindOnce() {
     }
   });
 
-  $("#exam-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (!state.user) return;
-    const form = event.currentTarget;
-    const name = form.elements.name.value.trim();
-    const examDate = form.elements.examDate.value;
-    if (!name || !examDate) return;
-    run(async () => {
-      await addDoc(userCollection("exams"), {
-        name,
-        subject: form.elements.subject.value,
-        examDate,
-        createdAt: serverTimestamp()
-      });
-      form.reset();
-    }, event.submitter);
-  });
-
-  $("#exam-list").addEventListener("click", (event) => {
-    const remove = event.target.closest("[data-exam-delete]");
-    if (remove) run(async () => {
-      const batch = writeBatch(db);
-      batch.delete(userDoc("exams", remove.dataset.examDelete));
-      await batch.commit();
-    });
-  });
-
-  $("#group-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (!state.user) return;
-    const form = event.currentTarget;
-    const name = form.elements.name.value.trim();
-    if (name.length < 2 || name.length > 40) {
-      showToast("Group names need 2 to 40 characters.");
-      return;
-    }
-    run(async () => {
-      const groupId = await createGroup(name, form.elements.subject.value);
-      form.reset();
-      showToast("Group created. Share the invite code with your friends.");
-      const wait = window.setInterval(() => {
-        if (ws.groups.some((group) => group.id === groupId)) {
-          window.clearInterval(wait);
-          openGroup(groupId);
-        }
-      }, 150);
-      window.setTimeout(() => window.clearInterval(wait), 4000);
-    }, event.submitter);
-  });
-
-  $("#join-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (!state.user) return;
-    const form = event.currentTarget;
-    run(async () => {
-      const joined = await joinGroup(form.elements.code.value);
-      if (joined) {
+  const examForm = $("#exam-form");
+  if (examForm) {
+    bindOnce(examForm, "submit", (event) => {
+      event.preventDefault();
+      if (!state.user) return;
+      const form = event.currentTarget;
+      const name = form.elements.name.value.trim();
+      const examDate = form.elements.examDate.value;
+      if (!name || !examDate) return;
+      run(async () => {
+        await addDoc(userCollection("exams"), {
+          name,
+          subject: form.elements.subject.value,
+          examDate,
+          createdAt: serverTimestamp()
+        });
         form.reset();
-        showToast("You joined the group.");
-      }
-    }, event.submitter);
-  });
-
-  $("#group-list").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-open-group]");
-    if (button) openGroup(button.dataset.openGroup);
-  });
-
-  $("#copy-code").addEventListener("click", async () => {
-    const group = ws.groups.find((entry) => entry.id === ws.activeGroupId);
-    if (!group) return;
-    const copied = await copyText(group.code);
-    showToast(copied ? `Invite code ${group.code} copied.` : `Invite code: ${group.code}`);
-  });
-
-  $("#leave-group").addEventListener("click", () => {
-    const group = ws.groups.find((entry) => entry.id === ws.activeGroupId);
-    if (!group) return;
-    const owner = group.ownerId === state.user.uid;
-    const question = owner ? "Delete this group and all its messages for everyone?" : "Leave this group?";
-    if (!window.confirm(question)) return;
-    run(async () => {
-      if (owner) {
-        await deleteGroup(group);
-        showToast("Group deleted.");
-      } else {
-        await updateDoc(doc(db, "groups", group.id), { memberIds: arrayRemove(state.user.uid) });
-        showToast("You left the group.");
-      }
+      }, event.submitter);
     });
-  });
+  }
 
-  $("#chat-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const text = form.elements.text.value.trim();
-    if (!text || !ws.activeGroupId || !state.user) return;
-    form.elements.text.value = "";
-    run(async () => {
-      await addDoc(collection(db, "groups", ws.activeGroupId, "messages"), {
-        uid: state.user.uid,
-        name: state.profile?.displayName || "Study buddy",
-        text: text.slice(0, 500),
-        createdAt: serverTimestamp()
+  const examList = $("#exam-list");
+  if (examList) {
+    bindOnce(examList, "click", (event) => {
+      const remove = event.target.closest("[data-exam-delete]");
+      if (remove) run(async () => {
+        const batch = writeBatch(db);
+        batch.delete(userDoc("exams", remove.dataset.examDelete));
+        await batch.commit();
       });
     });
-  });
-}
-
-export function initWorkspaceUI() {
-  bindOnce();
-}
-
-export function startWorkspace() {
-  stopWorkspace();
-  if (!state.user) return;
-  bindOnce();
-  const uid = state.user.uid;
-  listen(query(userCollection("tasks"), limit(200)), (items) => {
-    ws.tasks = items;
-    renderTasks();
-    renderStats();
-    setData("tasks", items);
-  });
-  listen(query(userCollection("sessions"), orderBy("createdAt", "desc"), limit(200)), (items) => {
-    ws.sessions = items;
-    renderSessions();
-    renderStats();
-    setData("sessions", items);
-  });
-  listen(query(userCollection("decks"), limit(40)), (items) => {
-    ws.decks = items;
-    renderDecks();
-    setData("decks", items);
-  });
-  listen(query(userCollection("exams"), limit(40)), (items) => {
-    ws.exams = items;
-    renderExams();
-    setData("exams", items);
-  });
-  listen(query(collection(db, "groups"), where("memberIds", "array-contains", uid), limit(20)), (items) => {
-    ws.groups = items;
-    renderGroups();
-    syncActiveGroup();
-    setData("groups", items);
-  });
-  startNotes();
-  startGrades();
-  setMode("focus");
-  let saved = "overview";
-  try {
-    saved = localStorage.getItem("studygroup-tab") || "overview";
-  } catch (error) {
-    saved = "overview";
   }
-  activateTab($$(`[data-tab="${saved}"]`).length ? saved : "overview");
-}
 
-export function stopWorkspace() {
-  ws.listeners.forEach((stop) => stop());
-  ws.listeners = [];
-  if (ws.chatListener) ws.chatListener();
-  ws.chatListener = null;
-  ws.activeGroupId = null;
-  ws.tasks = [];
-  ws.sessions = [];
-  ws.decks = [];
-  ws.exams = [];
-  ws.groups = [];
-  stopNotes();
-  stopGrades();
-  clearData();
-  timer.running = false;
-  stopTicking();
-  document.title = baseTitle;
-  if (ws.bound) {
-    renderTasks();
-    renderSessions();
-    renderDecks();
-    renderExams();
-    renderGroups();
-    renderStats();
-    $("#chat-room").hidden = true;
-    $("#chat-empty").hidden = false;
-    if ($("#study-dialog").open) $("#study-dialog").close();
+  const groupForm = $("#group-form");
+  if (groupForm) {
+    bindOnce(groupForm, "submit", (event) => {
+      event.preventDefault();
+      if (!state.user) return;
+      const form = event.currentTarget;
+      const name = form.elements.name.value.trim();
+      if (name.length < 2 || name.length > 40) {
+        showToast("Group names need 2 to 40 characters.");
+        return;
+      }
+      run(async () => {
+        const groupId = await createGroup(name, form.elements.subject.value);
+        form.reset();
+        showToast("Group created. Share the invite code with your friends.");
+        const wait = window.setInterval(() => {
+          if (ws.groups.some((group) => group.id === groupId)) {
+            window.clearInterval(wait);
+            openGroup(groupId);
+          }
+        }, 100);
+      }, event.submitter);
+    });
   }
 }
