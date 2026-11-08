@@ -304,18 +304,24 @@ window.setTimeout(() => {
   }
 }, 8000);
 
-authClient.getSession().then((result) => {
-  if (result.error) throw result.error;
-  const authUser = result.data?.user;
-  const user = authUser ? { ...authUser, uid: authUser.id, displayName: authUser.name } : null;
-  if (!user) {
-    leaveToLanding();
-    return;
-  }
-  loadUser(user);
-}).catch((error) => {
-  console.error("Could not verify the Neon Auth session.", error);
-  revealPage();
-  showBanner("We couldn't check your sign-in. Please log in again.", true);
-  window.setTimeout(leaveToLanding, 2500);
-});
+const urlParams = new URLSearchParams(window.location.search);
+const hasVerifier = urlParams.has("neon_auth_session_verifier") || urlParams.has("oauth");
+const checkDelay = hasVerifier ? 1200 : 0;
+
+window.setTimeout(() => {
+  authClient.getSession().then((result) => {
+    if (result.error) throw result.error;
+    const authUser = result.data?.user;
+    const user = authUser ? { ...authUser, uid: authUser.id, displayName: authUser.name } : null;
+    if (!user) {
+      leaveToLanding();
+      return;
+    }
+    loadUser(user);
+  }).catch((error) => {
+    console.error("Could not verify the Neon Auth session.", error);
+    revealPage();
+    showBanner("We couldn't check your sign-in. Please log in again.", true);
+    window.setTimeout(leaveToLanding, 2500);
+  });
+}, checkDelay);
