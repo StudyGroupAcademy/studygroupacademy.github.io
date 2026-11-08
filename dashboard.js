@@ -1,5 +1,5 @@
 import { authClient, getCurrentSession, getSessionUser } from "./auth-client.js";
-import { collection, completeActivity, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where } from "./firestore-client.js";
+import { addDoc, arrayUnion, collection, completeActivity, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from "./firestore-client.js";
 import { $, $$, db, state, showBanner } from "./core.js";
 import { ensureUserProfile, saveDailyGoal, saveProfileChoices, takeWelcomeFlag } from "./session.js";
 import { consumeOAuthCallback, describeOAuthError } from "./helpers.js";
@@ -14,6 +14,7 @@ let currentBoard = "xp";
 let calendarDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let calendarSelected = new Date().toISOString().slice(0, 10);
 let activeGroupCode = null;
+let activeGroupListener = null;
 let activeNoteId = null;
 let timerSeconds = 25 * 60;
 let timerRunning = false;
@@ -821,129 +822,190 @@ function bindNoteActions() {
   }
 }
 
+function stopGroupMessages() {
+  if (activeGroupListener) activeGroupListener();
+  activeGroupListener = null;
+}
+
+function renderGroupMessages(snapshot) {
+  const box = $("#chat-messages");
+  if (!box) return;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 100;
+  const messages = snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+  box.innerHTML = messages.length ? messages.map((message) => {
+    const mine = message.uid === currentUser?.uid;
+    const sender = message.name || "StudyGroup member";
+    const stamp = message.createdAt?.toDate ? message.createdAt.toDate() : message.createdAt ? new Date(message.createdAt) : null;
+    const time = stamp && !Number.isNaN(stamp.getTime()) ? stamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    return `<article class="chat-message${mine ? " mine" : ""}"><div class="chat-message-meta"><strong>${escapeHtml(sender)}</strong><time>${escapeHtml(time)}</time></div><p>${escapeHtml(message.text || "")}</p></article>`;
+  }).join("") : `<div class="chat-empty-state"><span class="chat-empty-icon">✦</span><strong>Start the conversation</strong><p>Send the first message to your study group.</p></div>`;
+  if (nearBottom || box.dataset.firstRender === "true") box.scrollTop = box.scrollHeight;
+  box.dataset.firstRender = "false";
+}
+
+function openGroupChat(code, name, memberCount = 1) {
+  activeGroupCode = code;
+  stopGroupMessages();
+  const room = $("#chat-room");
+  const empty = $("#chat-empty");
+  if (room) room.hidden = false;
+  if (empty) empty.hidden = true;
+  const title = $("#chat-title");
+  if (title) title.textContent = name || "Study group";
+  const meta = $("#chat-meta");
+  if (meta) meta.textContent = `${memberCount} ${memberCount === 1 ? "member" : "members"} · Private group`;
+  const messageBox = $("#chat-messages");
+  if (messageBox) {
+    messageBox.innerHTML = `<div class="chat-loading">Loading messages…</div>`;
+    messageBox.dataset.firstRender = "true";
+  }
+  const group = window.__studyGroupActiveData || {};
+  const invite = group.code || code;
+  const copyBtn = $("#copy-code");
+  if (copyBtn) copyBtn.dataset.inviteCode = invite;
+  const leaveBtn = $("#leave-group");
+  if (leaveBtn) leaveBtn.textContent = group.ownerId === currentUser?.uid ? "Delete group" : "Leave group";
+  activeGroupListener = onSnapshot(
+    query(collection(db, "groups", code, "messages"), orderBy("createdAt", "asc"), limit(100)),
+    renderGroupMessages,
+    (error) => {
+      console.error("Could not load group messages:", error);
+      const box = $("#chat-messages");
+      if (box) box.innerHTML = `<div class="chat-error">Messages could not be loaded. ${escapeHtml(error.message || "Please try again.")}</div>`;
+    }
+  );
+}
+
 function bindGroupActions() {
   const groupForm = $("#group-form");
-  if (groupForm) {
-    groupForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser) return;
+  if (groupForm) groupForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!currentUser) return;
+    const button = groupForm.querySelector('[type="submit"]');
+    if (button) button.disabled = true;
+    try {
       const data = new FormData(groupForm);
-      const name = data.get("name").trim();
-      const subject = data.get("subject");
-      if (!name) return;
-
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      try {
-        await setDoc(doc(db, "groups", code), {
-          name,
-          subject,
-          ownerId: currentUser.uid,
-          memberIds: [currentUser.uid],
-          code,
-          createdAt: new Date().toISOString()
-        });
-        await setDoc(doc(db, "groupCodes", code), { groupId: code, ownerId: currentUser.uid });
-        groupForm.reset();
-        await loadGroups();
-        openGroupChat(code, name);
-      } catch (err) {
-        console.error("Failed to create group:", err);
-      }
-    });
-  }
+      const name = String(data.get("name") || "").trim();
+      const subject = String(data.get("subject") || "").trim();
+      if (name.length < 2 || !subject) return;
+      const code = Array.from(crypto.getRandomValues(new Uint8Array(6)), value => "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[value % 36]).join("");
+      await setDoc(doc(db, "groups", code), {
+        name, subject, code, ownerId: currentUser.uid, memberIds: [currentUser.uid], createdAt: serverTimestamp()
+      });
+      await setDoc(doc(db, "groupCodes", code), { groupId: code, ownerId: currentUser.uid });
+      groupForm.reset();
+      await loadGroups();
+      window.__studyGroupActiveData = { name, subject, code, ownerId: currentUser.uid, memberIds: [currentUser.uid] };
+      openGroupChat(code, name, 1);
+    } catch (error) {
+      console.error("Could not create study group:", error);
+      showBanner(error.message || "Your group could not be created. Please try again.", true);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
 
   const joinForm = $("#join-form");
-  if (joinForm) {
-    joinForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser) return;
-      const data = new FormData(joinForm);
-      const code = data.get("code").trim().toUpperCase();
-      if (!code) return;
-
-      try {
-        const groupRef = doc(db, "groups", code);
-        const snap = await getDoc(groupRef);
-        if (!snap.exists()) {
-          alert("Group not found with that code.");
-          return;
-        }
-        const groupData = snap.data();
-        const members = groupData.memberIds || [];
-        if (!members.includes(currentUser.uid)) {
-          await updateDoc(groupRef, { memberIds: [...members, currentUser.uid] });
-        }
-        joinForm.reset();
-        await loadGroups();
-        openGroupChat(code, groupData.name);
-      } catch (err) {
-        console.error("Failed to join group:", err);
-      }
-    });
-  }
+  if (joinForm) joinForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!currentUser) return;
+    const button = joinForm.querySelector('[type="submit"]');
+    if (button) button.disabled = true;
+    try {
+      const code = String(new FormData(joinForm).get("code") || "").trim().toUpperCase();
+      if (!/^[A-Z0-9]{6}$/.test(code)) throw new Error("Enter a valid 6-character invite code.");
+      const invite = await getDoc(doc(db, "groupCodes", code));
+      if (!invite.exists()) throw new Error("No study group was found for that invite code.");
+      const groupId = invite.data().groupId;
+      const groupRef = doc(db, "groups", groupId);
+      const groupSnap = await getDoc(groupRef);
+      if (!groupSnap.exists()) throw new Error("That invite code no longer points to an active group.");
+      const group = groupSnap.data();
+      if (!(group.memberIds || []).includes(currentUser.uid)) await updateDoc(groupRef, { memberIds: arrayUnion(currentUser.uid) });
+      joinForm.reset();
+      await loadGroups();
+      window.__studyGroupActiveData = group;
+      openGroupChat(groupId, group.name, (group.memberIds || []).length + ((group.memberIds || []).includes(currentUser.uid) ? 0 : 1));
+    } catch (error) {
+      console.error("Could not join study group:", error);
+      showBanner(error.message || "You could not join this group. Please check the code and try again.", true);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
 
   const chatForm = $("#chat-form");
-  if (chatForm) {
-    chatForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser || !activeGroupCode) return;
-      const data = new FormData(chatForm);
-      const text = data.get("text").trim();
-      if (!text) return;
-
-      try {
-        const profileSnap = await getDoc(doc(db, "users", currentUser.uid));
-        const senderName = profileSnap.exists() ? (profileSnap.data().nickname || profileSnap.data().displayName || "Learner") : "Learner";
-
-        await setDoc(doc(collection(db, "groups", activeGroupCode, "messages")), {
-          text,
-          sender: currentUser.uid,
-          senderName,
-          createdAt: new Date().toISOString()
-        });
-        chatForm.reset();
-      } catch (err) {
-        console.error("Failed to send message:", err);
-      }
-    });
-  }
+  if (chatForm) chatForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!currentUser || !activeGroupCode) return;
+    const input = chatForm.elements.text;
+    const text = String(input.value || "").trim();
+    if (!text) return;
+    const button = chatForm.querySelector('[type="submit"]');
+    if (button) button.disabled = true;
+    try {
+      const profile = await getDoc(doc(db, "users", currentUser.uid));
+      const profileData = profile.exists() ? profile.data() : {};
+      const name = String(profileData.nickname || profileData.displayName || currentUser.name || currentUser.email?.split("@")[0] || "Learner").slice(0, 24);
+      await addDoc(collection(db, "groups", activeGroupCode, "messages"), {
+        uid: currentUser.uid, name, text: text.slice(0, 500), createdAt: serverTimestamp()
+      });
+      input.value = "";
+      input.focus();
+    } catch (error) {
+      console.error("Could not send group message:", error);
+      showBanner(error.message || "Your message could not be sent. Please try again.", true);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
 
   const copyBtn = $("#copy-code");
-  if (copyBtn) {
-    copyBtn.addEventListener("click", () => {
-      if (!activeGroupCode) return;
-      navigator.clipboard.writeText(activeGroupCode);
-      copyBtn.textContent = "Copied!";
-      setTimeout(() => copyBtn.textContent = "Copy invite code", 2000);
-    });
-  }
+  if (copyBtn) copyBtn.addEventListener("click", async () => {
+    const code = copyBtn.dataset.inviteCode || activeGroupCode;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      copyBtn.textContent = "Copied";
+      setTimeout(() => { copyBtn.textContent = "Copy invite code"; }, 1600);
+    } catch (error) {
+      showBanner("Could not copy the invite code. You can select it from the group details.", true);
+    }
+  });
 
   const leaveBtn = $("#leave-group");
-  if (leaveBtn) {
-    leaveBtn.addEventListener("click", async () => {
-      if (!currentUser || !activeGroupCode) return;
-      try {
-        const groupRef = doc(db, "groups", activeGroupCode);
-        const snap = await getDoc(groupRef);
-        if (snap.exists()) {
-          const groupData = snap.data();
-          if (groupData.ownerId === currentUser.uid) {
-            await deleteDoc(groupRef);
-            await deleteDoc(doc(db, "groupCodes", activeGroupCode));
-          } else {
-            const memberIds = (groupData.memberIds || []).filter(id => id !== currentUser.uid);
-            await updateDoc(groupRef, { memberIds });
-          }
-        }
-        activeGroupCode = null;
-        $("#chat-room").hidden = true;
-        $("#chat-empty").hidden = false;
-        await loadGroups();
-      } catch (err) {
-        console.error("Failed to leave group:", err);
+  if (leaveBtn) leaveBtn.addEventListener("click", async () => {
+    if (!currentUser || !activeGroupCode) return;
+    const groupId = activeGroupCode;
+    const group = window.__studyGroupActiveData || {};
+    leaveBtn.disabled = true;
+    try {
+      const ref = doc(db, "groups", groupId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) throw new Error("This group no longer exists.");
+      const data = snap.data();
+      if (data.ownerId === currentUser.uid) {
+        const messages = await getDocs(query(collection(db, "groups", groupId, "messages"), limit(400)));
+        for (const message of messages.docs) await deleteDoc(message.ref);
+        await deleteDoc(ref);
+        await deleteDoc(doc(db, "groupCodes", data.code || groupId));
+      } else {
+        const members = (data.memberIds || []).filter(id => id !== currentUser.uid);
+        await updateDoc(ref, { memberIds: members });
       }
-    });
-  }
+      stopGroupMessages();
+      activeGroupCode = null;
+      window.__studyGroupActiveData = null;
+      $("#chat-room").hidden = true;
+      $("#chat-empty").hidden = false;
+      await loadGroups();
+    } catch (error) {
+      console.error("Could not leave study group:", error);
+      showBanner(error.message || "Could not leave this group. Please try again.", true);
+    } finally {
+      leaveBtn.disabled = false;
+    }
+  });
 }
 
 function bindSchoolActions() {
@@ -1290,32 +1352,30 @@ async function loadGroups() {
   if (!container) return;
   try {
     const snap = await getDocs(query(collection(db, "groups"), where("memberIds", "array-contains", currentUser.uid)));
-    const groups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    container.innerHTML = groups.length ? groups.map(g => `
-      <div class="item-row">
-        <div><strong>${escapeHtml(g.name)}</strong><span class="item-meta">${escapeHtml(g.subject)} · Code: ${g.id}</span></div>
-        <button class="button button-light" type="button" data-group-open="${g.id}" data-group-name="${escapeHtml(g.name)}">Open Chat</button>
-      </div>
-    `).join("") : `<p class="muted-line">You haven't joined any study groups yet.</p>`;
-
-    container.querySelectorAll("[data-group-open]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        openGroupChat(btn.dataset.groupOpen, btn.dataset.groupName);
-      });
-    });
-  } catch (err) {
-    console.error("Failed to load groups:", err);
+    const groups = snap.docs.map(entry => ({ id: entry.id, ...entry.data() })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    container.innerHTML = groups.length ? groups.map(group => `
+      <button class="group-list-card${group.id === activeGroupCode ? " is-active" : ""}" type="button" data-group-open="${escapeHtml(group.id)}">
+        <span class="group-list-icon">${escapeHtml((group.subject || "S").slice(0, 1).toUpperCase())}</span>
+        <span class="group-list-copy"><strong>${escapeHtml(group.name)}</strong><small>${escapeHtml(group.subject)} · ${(group.memberIds || []).length} ${(group.memberIds || []).length === 1 ? "member" : "members"}</small></span>
+        <span class="group-list-arrow">›</span>
+      </button>`).join("") : `<div class="group-list-empty"><strong>No groups yet</strong><span>Create a group or join one with an invite code.</span></div>`;
+    container.querySelectorAll("[data-group-open]").forEach(button => button.addEventListener("click", () => {
+      const group = groups.find(item => item.id === button.dataset.groupOpen);
+      if (!group) return;
+      window.__studyGroupActiveData = group;
+      openGroupChat(group.id, group.name, (group.memberIds || []).length);
+      container.querySelectorAll(".group-list-card").forEach(item => item.classList.toggle("is-active", item === button));
+    }));
+    if (activeGroupCode && !groups.some(group => group.id === activeGroupCode)) {
+      stopGroupMessages();
+      activeGroupCode = null;
+      $("#chat-room").hidden = true;
+      $("#chat-empty").hidden = false;
+    }
+  } catch (error) {
+    console.error("Could not load study groups:", error);
+    container.innerHTML = `<div class="group-list-error">Your groups could not be loaded. ${escapeHtml(error.message || "Please refresh and try again.")}</div>`;
   }
-}
-
-function openGroupChat(code, name) {
-  activeGroupCode = code;
-  const chatRoom = $("#chat-room");
-  const chatEmpty = $("#chat-empty");
-  const titleElem = $("#chat-group-title");
-  if (chatRoom) chatRoom.hidden = false;
-  if (chatEmpty) chatEmpty.hidden = true;
-  if (titleElem) titleElem.textContent = name;
 }
 
 function leaderboardPeriodKey(period, date = new Date()) {
