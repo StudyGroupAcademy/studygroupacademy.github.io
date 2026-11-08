@@ -331,7 +331,7 @@ function bindProfileDialog() {
       if (errBox) errBox.hidden = true;
       await saveProfileChoices({ nickname, displayName, handle, bio }, optIn);
       dialog.close();
-      const snapshot = await getDoc(doc(null, "users", currentUser.uid));
+      const snapshot = await getDoc(doc(db, "users", currentUser.uid));
       if (snapshot.exists()) {
         renderSignedIn(snapshot.data());
       }
@@ -355,7 +355,7 @@ async function openProfileDialog(isWelcome) {
   }
 
   try {
-    const snap = await getDoc(doc(null, "users", currentUser.uid));
+    const snap = await getDoc(doc(db, "users", currentUser.uid));
     if (snap.exists()) {
       const data = snap.data();
       if (form.elements["nickname"]) form.elements["nickname"].value = data.nickname || "";
@@ -686,7 +686,7 @@ function bindGroupActions() {
       if (!text) return;
 
       try {
-        const profileSnap = await getDoc(doc(null, "users", currentUser.uid));
+        const profileSnap = await getDoc(doc(db, "users", currentUser.uid));
         const senderName = profileSnap.exists() ? (profileSnap.data().nickname || profileSnap.data().displayName || "Learner") : "Learner";
 
         await setDoc(doc(collection(db, "studyGroups", activeGroupCode, "messages")), {
@@ -767,7 +767,7 @@ async function loadAllPanelData() {
 async function loadStats() {
   if (!currentUser) return;
   try {
-    const userSnap = await getDoc(doc(null, "users", currentUser.uid));
+    const userSnap = await getDoc(doc(db, "users", currentUser.uid));
     const userData = userSnap.exists() ? userSnap.data() : {};
 
     const xpElem = $("#stat-xp");
@@ -999,7 +999,7 @@ function renderCard() {
     </div>
   `;
 
-  $("#flip-card").addEventListener("click", () => {
+  $("#flip-card")?.addEventListener("click", () => {
     cardShowingAnswer = !cardShowingAnswer;
     renderCard();
   });
@@ -1009,207 +1009,4 @@ function renderCard() {
     cardShowingAnswer = false;
     renderCard();
   });
-}
-
-async function loadNotes() {
-  if (!currentUser) return;
-  const container = $("#note-list");
-  const form = $("#note-form");
-  const searchInput = $("#note-search");
-  if (!container || !form) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "notes")));
-    let notes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    const term = searchInput?.value?.trim()?.toLowerCase();
-    if (term) {
-      notes = notes.filter(n => n.title.toLowerCase().includes(term) || n.body?.toLowerCase().includes(term));
-    }
-
-    container.innerHTML = notes.length ? notes.map(n => `
-      <button class="group-item ${n.id === activeNoteId ? "is-active" : ""}" type="button" data-note-select="${n.id}">
-        <strong>${escapeHtml(n.title)}</strong>
-        <small>${escapeHtml(n.subject || "")}</small>
-      </button>
-    `).join("") : `<p class="muted-line">No notes found.</p>`;
-
-    container.querySelectorAll("[data-note-select]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset.noteSelect;
-        const note = notes.find(n => n.id === id);
-        if (note) {
-          activeNoteId = note.id;
-          form.elements["title"].value = note.title;
-          form.elements["subject"].value = note.subject || DEFAULT_SUBJECTS[0];
-          form.elements["body"].value = note.body || "";
-          const status = $("#note-status");
-          if (status) status.textContent = "Editing saved note";
-          const delBtn = $("#note-delete");
-          if (delBtn) delBtn.hidden = false;
-          loadNotes();
-        }
-      });
-    });
-  } catch (err) {
-    console.error("Failed to load notes:", err);
-  }
-}
-
-async function loadGroups() {
-  if (!currentUser) return;
-  const container = $("#group-list");
-  if (!container) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "studyGroups"), where("members", "array-contains", currentUser.uid)));
-    const groups = snap.docs.map(d => ({ code: d.id, ...d.data() }));
-
-    container.innerHTML = groups.length ? groups.map(g => `
-      <button class="group-item ${g.code === activeGroupCode ? "is-active" : ""}" type="button" data-group-select="${g.code}" data-group-name="${escapeHtml(g.name)}">
-        <strong>${escapeHtml(g.name)}</strong>
-        <small>${escapeHtml(g.subject)} · ${g.members?.length || 1} members</small>
-      </button>
-    `).join("") : `<p class="muted-line">Not in any study groups yet.</p>`;
-
-    container.querySelectorAll("[data-group-select]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const code = btn.dataset.groupSelect;
-        const name = btn.dataset.groupName;
-        openGroupChat(code, name);
-      });
-    });
-  } catch (err) {
-    console.error("Failed to load groups:", err);
-  }
-}
-
-async function openGroupChat(code, name) {
-  activeGroupCode = code;
-  $("#chat-empty").hidden = true;
-  const room = $("#chat-room");
-  room.hidden = false;
-  $("#chat-title").textContent = name;
-  $("#chat-meta").textContent = `Invite code: ${code}`;
-
-  await loadChatMessages(code);
-  await loadGroups();
-}
-
-async function loadChatMessages(code) {
-  const container = $("#chat-messages");
-  if (!container) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "studyGroups", code, "messages")));
-    const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    msgs.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-    container.innerHTML = msgs.length ? msgs.map(m => `
-      <div class="chat-message ${m.sender === currentUser?.uid ? "is-mine" : ""}">
-        <span class="chat-sender">${escapeHtml(m.senderName || "Learner")}</span>
-        <p>${escapeHtml(m.text)}</p>
-      </div>
-    `).join("") : `<p class="muted-line">No messages yet. Say hello!</p>`;
-
-    container.scrollTop = container.scrollHeight;
-  } catch (err) {
-    console.error("Failed to load messages:", err);
-  }
-}
-
-async function loadLeaderboard() {
-  const container = $("#leaderboard-list");
-  const rankElem = $("#my-rank");
-  if (!container) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "publicLeaderboard")));
-    let entries = snap.docs.map(d => d.data());
-
-    if (currentBoard === "xp") {
-      entries.sort((a, b) => (b.xp || 0) - (a.xp || 0));
-    } else {
-      entries.sort((a, b) => (b.weeklyMinutes || 0) - (a.weeklyMinutes || 0));
-    }
-
-    container.innerHTML = entries.length ? entries.slice(0, 10).map((e, idx) => `
-      <div class="leaderboard-row ${e.uid === currentUser?.uid ? "is-me" : ""}">
-        <span class="rank-num">#${idx + 1}</span>
-        <span class="rank-name">${escapeHtml(e.nickname || e.displayName || "Learner")} ✳</span>
-        <span class="rank-score">${currentBoard === "xp" ? `${e.xp || 0} XP` : `${e.weeklyMinutes || 0} mins`}</span>
-      </div>
-    `).join("") : `<p class="muted-line">No members on the leaderboard yet. Opt in from your profile!</p>`;
-
-    if (currentUser && rankElem) {
-      const myIdx = entries.findIndex(e => e.uid === currentUser.uid);
-      rankElem.textContent = myIdx !== -1 ? `Your rank: #${myIdx + 1}` : "You are not currently on the public leaderboard. Opt in via your profile settings!";
-    }
-  } catch (err) {
-    console.error("Failed to load leaderboard:", err);
-    container.innerHTML = `<p class="muted-line">Could not load leaderboard.</p>`;
-  }
-}
-
-async function loadSessions() {
-  if (!currentUser) return;
-  const listContainer = $("#session-list");
-  const barsContainer = $("#week-bars");
-  if (!listContainer || !barsContainer) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "sessions")));
-    const sessions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    sessions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    listContainer.innerHTML = sessions.length ? sessions.slice(0, 5).map(s => `
-      <div class="item-row">
-        <span><strong>${s.minutes} mins focus</strong></span>
-        <span class="item-meta">${escapeHtml(s.subject)} · ${new Date(s.createdAt).toLocaleDateString()}</span>
-      </div>
-    `).join("") : `<p class="muted-line">No study sessions logged yet.</p>`;
-
-    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    barsContainer.innerHTML = days.map(d => `
-      <div class="week-bar-col">
-        <div class="week-bar"><i></i></div>
-        <span>${d}</span>
-      </div>
-    `).join("");
-  } catch (err) {
-    console.error("Failed to load sessions:", err);
-  }
-}
-
-async function loadSchoolData() {
-  const statusElem = $("#school-status");
-  if (statusElem) {
-    statusElem.textContent = "School workspace is available.";
-  }
-}
-
-async function downloadUserData() {
-  if (!currentUser) return;
-  try {
-    const data = {
-      uid: currentUser.uid,
-      email: currentUser.email,
-      exportedAt: new Date().toISOString()
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "studygroup-data.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (err) {
-    console.error("Failed to download data:", err);
-  }
-}
-
-function escapeHtml(str) {
-  return String(str || "").replace(/[&<>"']/g, (m) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  })[m]);
 }
