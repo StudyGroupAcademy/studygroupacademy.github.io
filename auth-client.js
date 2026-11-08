@@ -8,3 +8,18 @@ export const authClient = createAuthClient(
     }
   }
 );
+
+export async function getAuthToken() {
+  if (typeof authClient.token === "function") {
+    const tokenResult = await authClient.token();
+    if (tokenResult.error) throw tokenResult.error;
+    if (tokenResult.data?.token) return tokenResult.data.token;
+  }
+  const sessionResult = await authClient.getSession();
+  if (sessionResult.error) throw sessionResult.error;
+  return sessionResult.data?.session?.token
+    || sessionResult.data?.session?.access_token
+    || sessionResult.data?.session?.accessToken
+    || sessionResult.data?.token
+    || null;
+}

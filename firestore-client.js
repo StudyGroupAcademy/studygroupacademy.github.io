@@ -1,4 +1,4 @@
-import { authClient } from "./auth-client.js";
+import { getAuthToken } from "./auth-client.js";
 
 const API_URL = "https://studygroupacademy-github-io.onrender.com/api/data";
 const SERVER_TIMESTAMP = "__studygroupServerTimestamp";
@@ -43,9 +43,7 @@ function decodeValue(value) {
 async function request(payload, allowAnonymous = false) {
   let token = null;
   if (!allowAnonymous) {
-    const session = await authClient.getSession();
-    if (session.error) throw session.error;
-    token = session.data?.session?.token || null;
+    token = await getAuthToken();
     if (!token) throw new Error("Please sign in to access your StudyGroup data.");
   }
 

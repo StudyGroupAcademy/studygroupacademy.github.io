@@ -1,4 +1,4 @@
-import { authClient } from "./auth-client.js";
+import { authClient, getAuthToken } from "./auth-client.js";
 import { $, $$, db, getErrorMessage, setFormError, showBanner, showToast } from "./core.js";
 import { doc, serverTimestamp, setDoc } from "./firestore-client.js";
 import { cleanNickname, consumeOAuthCallback, describeOAuthError, validNickname } from "./helpers.js";
@@ -234,9 +234,7 @@ $("#auth-sign-out").addEventListener("click", async () => {
 });
 
 async function uploadHomework(file) {
-  const sessionResult = await authClient.getSession();
-  if (sessionResult.error) throw sessionResult.error;
-  const token = sessionResult.data?.session?.token;
+  const token = await getAuthToken();
   if (!token) throw new Error("Your sign-in session could not be confirmed. Please sign out and log in again.");
 
   const signatureResponse = await fetch("https://studygroupacademy-github-io.onrender.com/api/cloudinary/signature", {

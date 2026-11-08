@@ -1,6 +1,6 @@
 import { authClient } from "./auth-client.js";
 import { collection, completeActivity, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where } from "./firestore-client.js";
-import { $, $$, db, state } from "./core.js";
+import { $, $$, db, state, showBanner } from "./core.js";
 import { ensureUserProfile, saveDailyGoal, saveProfileChoices, takeWelcomeFlag } from "./session.js";
 import { initResourceFilter, setLessonUser } from "./resources.js";
 
@@ -32,18 +32,16 @@ export async function initDashboard() {
   bindGroupActions();
   bindSchoolActions();
   
-  if (takeWelcomeFlag()) {
-    openProfileDialog(true);
-  }
+  const welcomePending = takeWelcomeFlag();
 
   try {
-    const sessionPromise = authClient.getSession();
-    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Auth timeout")), 3000));
-    
-    const sessionResult = await Promise.race([sessionPromise, timeoutPromise]);
-    currentUser = sessionResult.data?.user || null;
+    const sessionResult = await authClient.getSession();
+    if (sessionResult.error) throw sessionResult.error;
+    const user = sessionResult.data?.user || null;
+    currentUser = user ? { ...user, uid: user.id || user.uid } : null;
   } catch (err) {
     currentUser = null;
+    showBanner(err.message || "We couldn't restore your sign-in session. Please refresh and try again.", true);
   }
 
   document.body.classList.remove("checking");
@@ -54,16 +52,25 @@ export async function initDashboard() {
   }
 
   await handleSignedInUser(currentUser);
+  const welcomeFromProfile = takeWelcomeFlag();
+  if (welcomePending || welcomeFromProfile) openProfileDialog(true);
 }
 
 async function handleSignedInUser(user) {
-  currentUser = user;
-  const profile = await ensureUserProfile(user);
+  currentUser = { ...user, uid: user.id || user.uid };
+  state.user = currentUser;
+  const profile = await ensureUserProfile(currentUser);
+  state.profile = profile;
   renderSignedIn(profile);
   populateSubjectDropdowns();
   setLessonUser(user);
   initResourceFilter();
-  await loadAllPanelData();
+  try {
+    await loadAllPanelData();
+  } catch (error) {
+    console.error("Some dashboard panels could not be loaded.", error);
+    showBanner("Your dashboard opened, but some information could not be loaded. Check your connection and try again.", true);
+  }
 }
 
 function renderSignedIn(profile) {
@@ -301,7 +308,10 @@ function bindProfileDialog() {
     linkGoogleBtn.addEventListener("click", async () => {
       try {
         const callbackBase = `${window.location.origin}${window.location.pathname}`;
-        await authClient.signIn.social({
+        if (typeof authClient.linkSocial !== "function") {
+          throw new Error("Google account linking is not available in this authentication client. Please update the Neon Auth client.");
+        }
+        await authClient.linkSocial({
           provider: "google",
           callbackURL: `${callbackBase}?oauth=google-linked`,
           errorCallbackURL: `${callbackBase}?error=linking-failed`
@@ -371,6 +381,46 @@ async function openProfileDialog(isWelcome) {
   dialog.showModal();
 }
 
+function evaluateArithmetic(expression) {
+  const tokens = expression.match(/\d+(?:\.\d+)?|[()+*/-]/g) || [];
+  if (tokens.join("") !== expression.replace(/\s+/g, "")) throw new Error("Invalid expression");
+  let index = 0;
+  const parsePrimary = () => {
+    const token = tokens[index++];
+    if (token === "+") return parsePrimary();
+    if (token === "-") return -parsePrimary();
+    if (token === "(") {
+      const value = parseExpression();
+      if (tokens[index++] !== ")") throw new Error("Missing closing bracket");
+      return value;
+    }
+    if (!token || !/^\d+(?:\.\d+)?$/.test(token)) throw new Error("Expected a number");
+    return Number(token);
+  };
+  const parseTerm = () => {
+    let value = parsePrimary();
+    while (tokens[index] === "*" || tokens[index] === "/") {
+      const operator = tokens[index++];
+      const next = parsePrimary();
+      value = operator === "*" ? value * next : value / next;
+    }
+    return value;
+  };
+  const parseExpression = () => {
+    let value = parseTerm();
+    while (tokens[index] === "+" || tokens[index] === "-") {
+      const operator = tokens[index++];
+      const next = parseTerm();
+      value = operator === "+" ? value + next : value - next;
+    }
+    return value;
+  };
+  if (!tokens.length) throw new Error("Empty expression");
+  const result = parseExpression();
+  if (index !== tokens.length) throw new Error("Unexpected token");
+  return result;
+}
+
 function bindCalculator() {
   const display = $("#calculator-display");
   const result = $("#calculator-result");
@@ -419,7 +469,7 @@ function bindCalculator() {
         if (commit) result.textContent = "Invalid expression";
         return;
       }
-      const evaluated = Function(`'use strict'; return (${sanitized})`)();
+      const evaluated = evaluateArithmetic(sanitized);
       if (isNaN(evaluated) || !isFinite(evaluated)) {
         if (commit) result.textContent = "Cannot evaluate";
         return;
@@ -629,13 +679,15 @@ function bindGroupActions() {
 
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
       try {
-        await setDoc(doc(db, "studyGroups", code), {
+        await setDoc(doc(db, "groups", code), {
           name,
           subject,
-          owner: currentUser.uid,
-          members: [currentUser.uid],
+          ownerId: currentUser.uid,
+          memberIds: [currentUser.uid],
+          code,
           createdAt: new Date().toISOString()
         });
+        await setDoc(doc(db, "groupCodes", code), { groupId: code, ownerId: currentUser.uid });
         groupForm.reset();
         await loadGroups();
         openGroupChat(code, name);
@@ -655,17 +707,16 @@ function bindGroupActions() {
       if (!code) return;
 
       try {
-        const groupRef = doc(db, "studyGroups", code);
+        const groupRef = doc(db, "groups", code);
         const snap = await getDoc(groupRef);
         if (!snap.exists()) {
           alert("Group not found with that code.");
           return;
         }
         const groupData = snap.data();
-        const members = groupData.members || [];
+        const members = groupData.memberIds || [];
         if (!members.includes(currentUser.uid)) {
-          members.push(currentUser.uid);
-          await updateDoc(groupRef, { members });
+          await updateDoc(groupRef, { memberIds: [...members, currentUser.uid] });
         }
         joinForm.reset();
         await loadGroups();
@@ -689,7 +740,7 @@ function bindGroupActions() {
         const profileSnap = await getDoc(doc(db, "users", currentUser.uid));
         const senderName = profileSnap.exists() ? (profileSnap.data().nickname || profileSnap.data().displayName || "Learner") : "Learner";
 
-        await setDoc(doc(collection(db, "studyGroups", activeGroupCode, "messages")), {
+        await setDoc(doc(collection(db, "groups", activeGroupCode, "messages")), {
           text,
           sender: currentUser.uid,
           senderName,
@@ -717,11 +768,17 @@ function bindGroupActions() {
     leaveBtn.addEventListener("click", async () => {
       if (!currentUser || !activeGroupCode) return;
       try {
-        const groupRef = doc(db, "studyGroups", activeGroupCode);
+        const groupRef = doc(db, "groups", activeGroupCode);
         const snap = await getDoc(groupRef);
         if (snap.exists()) {
-          const members = (snap.data().members || []).filter(id => id !== currentUser.uid);
-          await updateDoc(groupRef, { members });
+          const groupData = snap.data();
+          if (groupData.ownerId === currentUser.uid) {
+            await deleteDoc(groupRef);
+            await deleteDoc(doc(db, "groupCodes", activeGroupCode));
+          } else {
+            const memberIds = (groupData.memberIds || []).filter(id => id !== currentUser.uid);
+            await updateDoc(groupRef, { memberIds });
+          }
         }
         activeGroupCode = null;
         $("#chat-room").hidden = true;
@@ -1011,6 +1068,7 @@ function renderCard() {
   });
 }
 
+
 async function loadSessions() {
   if (!currentUser) return;
   const container = $("#session-list");
@@ -1071,7 +1129,7 @@ async function loadGroups() {
   const container = $("#group-list");
   if (!container) return;
   try {
-    const snap = await getDocs(query(collection(db, "studyGroups"), where("members", "array-contains", currentUser.uid)));
+    const snap = await getDocs(query(collection(db, "groups"), where("memberIds", "array-contains", currentUser.uid)));
     const groups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     container.innerHTML = groups.length ? groups.map(g => `
       <div class="item-row">
@@ -1104,7 +1162,7 @@ async function loadLeaderboard() {
   const container = $("#leaderboard-list");
   if (!container) return;
   try {
-    const snap = await getDocs(query(collection(db, "users"), where("leaderboardOptIn", "==", true), limit(10)));
+    const snap = await getDocs(query(collection(db, "publicLeaderboard"), limit(10)));
     const users = snap.docs.map(d => d.data());
     container.innerHTML = users.length ? users.map((u, index) => `
       <div class="item-row">

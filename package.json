@@ -3,8 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node --check server.mjs && node --check app.js && node --check auth-client.js && node --check dashboard.js && node --check workspace.js && node --check session.js && node --check school-portal.js && node --check school-client.js && node --check resources.js && node --check course-catalog.js && node --check lesson-guides.js && node --check content-page.js && node --check helpers.js && node --check firestore-client.js && node --check core.js && node --check leaderboard.js",
-    "start": "node server.mjs"
+    "build": "node --check server.mjs && for file in ./*.js; do node --check \"$file\" || exit 1; done",
+    "start": "node server.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "@neon/config": "^1.13.0",

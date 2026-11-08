@@ -1,17 +1,24 @@
 import { authClient } from "./auth-client.js";
-import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "./firestore-client.js";
+import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "./firestore-client.js";
 
 export const NICKNAME_RULE = "Use 2–30 characters: letters, numbers, spaces, hyphens, or apostrophes.";
 
 export function takeWelcomeFlag() {
-  const key = "studygroup_welcome";
-  const flag = sessionStorage.getItem(key) === "true";
-  if (flag) sessionStorage.removeItem(key);
+  let flag = false;
+  try {
+    flag = sessionStorage.getItem("studygroup_welcome") === "true"
+      || sessionStorage.getItem("studygroup-welcome") === "1";
+    sessionStorage.removeItem("studygroup_welcome");
+    sessionStorage.removeItem("studygroup-welcome");
+  } catch (error) {
+    console.warn("Welcome state is unavailable.", error);
+  }
   return flag;
 }
 
 export async function ensureUserProfile(user) {
-  const uid = user.uid;
+  const uid = user?.id || user?.uid;
+  if (!uid) throw new Error("Your sign-in session does not contain a user ID. Please sign out and sign in again.");
   const userDocRef = doc(null, "users", uid);
   const snapshot = await getDoc(userDocRef);
 
@@ -19,10 +26,11 @@ export async function ensureUserProfile(user) {
     return snapshot.data();
   }
 
+  const displayName = user.name || user.displayName || user.email?.split("@")[0] || "Learner";
   const defaultProfile = {
     uid,
-    displayName: user.displayName || user.name || user.email?.split("@")[0] || "Learner",
-    nickname: user.displayName || user.name || "",
+    displayName,
+    nickname: displayName,
     handle: (user.email?.split("@")[0] || "user").toLowerCase().replace(/[^a-z0-9]/g, ""),
     bio: "",
     boards: {},
@@ -35,7 +43,11 @@ export async function ensureUserProfile(user) {
   };
 
   await setDoc(userDocRef, defaultProfile);
-  sessionStorage.setItem("studygroup_welcome", "true");
+  try {
+    sessionStorage.setItem("studygroup_welcome", "true");
+  } catch (error) {
+    console.warn("Welcome state could not be saved.", error);
+  }
   return defaultProfile;
 }
 
@@ -55,8 +67,8 @@ export async function saveProfileChoices(profileData, optIn) {
 
   await updateDoc(userDocRef, updates);
 
+  const publicRef = doc(null, "publicLeaderboard", uid);
   if (optIn) {
-    const publicRef = doc(null, "publicLeaderboard", uid);
     await setDoc(publicRef, {
       uid,
       displayName: profileData.displayName,
@@ -65,6 +77,8 @@ export async function saveProfileChoices(profileData, optIn) {
       xp: 0,
       updatedAt: new Date().toISOString()
     }, { merge: true });
+  } else {
+    await deleteDoc(publicRef);
   }
 }
 

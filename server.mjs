@@ -129,7 +129,13 @@ async function canReadRecord(client, uid, path) {
   if (path[0] === "users") return path[1] === uid;
   if (path[0] === "groupCodes") return true;
   const groupId = groupIdForPath(path);
-  return groupId ? isGroupMember(client, uid, groupId) : false;
+  if (!groupId) return false;
+  if (await isGroupMember(client, uid, groupId)) return true;
+  if (path.length === 2) {
+    const invite = await record(client, `groupCodes/${groupId}`);
+    return Boolean(invite && invite.data.groupId === groupId);
+  }
+  return false;
 }
 
 async function authorizeMutation(client, uid, change, existing) {
@@ -262,6 +268,56 @@ async function readJson(request) {
 }
 
 async function dataRequest(uid, body) {
+  if (body.op === "completeActivity") {
+    if (!uid) throw new Error("Please sign in to complete this activity.");
+    const activityId = String(body.activityId || "");
+    if (!xpActivityIds.has(activityId)) throw new Error("This learning activity is not recognised.");
+    const progressPath = `users/${uid}/learningProgress/${activityId}`;
+    const userPath = `users/${uid}`;
+    const profileRecord = await record(pool, userPath);
+    if (!profileRecord) throw new Error("Your learner profile could not be found. Please refresh and sign in again.");
+    await pool.query("BEGIN");
+    try {
+      const existingProgress = await record(pool, progressPath);
+      if (existingProgress) {
+        await pool.query("COMMIT");
+        return { awarded: false, xp: Number(existingProgress.data.xp) || 10 };
+      }
+      const award = 10;
+      await applyMutation(pool, uid, {
+        op: "set",
+        path: progressPath.split("/"),
+        data: { completed: true, xp: award, completedAt: new Date().toISOString() }
+      }, true);
+      const profile = applyFields(profileRecord.data, {
+        xp: (Number(profileRecord.data.xp) || 0) + award,
+        updatedAt: new Date().toISOString()
+      });
+      await pool.query("UPDATE app_records SET data = $2::jsonb, updated_at = now() WHERE path = $1", [userPath, JSON.stringify(profile)]);
+      if (profile.leaderboardOptIn) {
+        const publicPath = `publicLeaderboard/${uid}`;
+        const publicRecord = await record(pool, publicPath);
+        const publicData = applyFields(publicRecord?.data, {
+          uid,
+          displayName: profile.displayName || "Learner",
+          nickname: profile.nickname || profile.displayName || "Learner",
+          handle: profile.handle || "user",
+          xp: profile.xp,
+          updatedAt: new Date().toISOString()
+        });
+        await pool.query(
+          `INSERT INTO app_records (path, owner_id, data, updated_at) VALUES ($1, $2, $3::jsonb, now())
+           ON CONFLICT (path) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+          [publicPath, uid, JSON.stringify(publicData)]
+        );
+      }
+      await pool.query("COMMIT");
+      return { awarded: true, xp: award, totalXp: profile.xp };
+    } catch (error) {
+      await pool.query("ROLLBACK");
+      throw error;
+    }
+  }
   if (body.op === "get") {
     const path = body.path;
     const key = assertPath(path);
@@ -323,7 +379,7 @@ async function authenticatedUser(request) {
 
   try {
     const { payload } = await jwtVerify(match[1], jwks, {
-      issuer: authIssuer
+      issuer: [authIssuer, authBaseUrl.replace(/\/$/, "")]
     });
     return typeof payload.sub === "string" && payload.sub
       ? { id: payload.sub, email: typeof payload.email === "string" ? payload.email.toLowerCase() : "" }

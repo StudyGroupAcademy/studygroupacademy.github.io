@@ -187,14 +187,14 @@ function bindLessonInteractions(container) {
 }
 
 export async function setLessonUser(user) {
-  lessonUser = user;
+  lessonUser = user ? { ...user, uid: user.id || user.uid } : null;
   lessonProgress = {};
   if (!user) {
     renderLessonProgress();
     return;
   }
   try {
-    const progress = await getDocs(query(collection(db, "users", user.uid, "learningProgress"), limit(100)));
+    const progress = await getDocs(query(collection(db, "users", lessonUser.uid, "learningProgress"), limit(100)));
     lessonProgress = Object.fromEntries(progress.docs.map((entry) => [entry.id, entry.data()]));
     renderLessonProgress();
   } catch (error) {
