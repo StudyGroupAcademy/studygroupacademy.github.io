@@ -36,8 +36,8 @@ export function renderInsights() {
   $("#goal-text").textContent = stats.today >= goal
     ? `Goal reached: ${stats.today} of ${goal} minutes today.`
     : `${stats.today} of ${goal} minutes today. ${goal - stats.today} to go.`;
-  const goalInput = $("#goal-form").elements.goal;
-  if (document.activeElement !== goalInput) goalInput.value = goal;
+  const goalInput = $("#goal-form")?.elements?.goal;
+  if (goalInput && document.activeElement !== goalInput) goalInput.value = goal;
 
   const upcoming = store.exams
     .filter((exam) => describeCountdown(exam.examDate) !== "Finished")
@@ -102,9 +102,13 @@ export function clearData() {
 }
 
 export function initInsights() {
+  const goalForm = $("#goal-form");
+  if (!goalForm) return;
+
   if (bound) return;
   bound = true;
-  $("#goal-form").addEventListener("submit", async (event) => {
+
+  goalForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const minutes = Math.round(Number(form.elements.goal.value));
