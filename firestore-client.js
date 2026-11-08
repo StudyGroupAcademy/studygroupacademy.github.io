@@ -1,21 +1,4 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { getAuth, GoogleAuthProvider } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
-
-const app = initializeApp(firebaseConfig);
-
-export const db = getFirestore(app);
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
+import { authClient } from "./auth-client.js";
 
 const API_URL = "https://studygroupacademy-github-io.onrender.com/api/data";
 const SERVER_TIMESTAMP = "__studygroupServerTimestamp";
@@ -59,15 +42,11 @@ function decodeValue(value) {
 
 async function request(payload, allowAnonymous = false) {
   let token = null;
-  const currentUser = auth.currentUser;
-
   if (!allowAnonymous) {
-    if (!currentUser) {
-      throw new Error("Please sign in to access your StudyGroup data.");
-    }
-    token = await currentUser.getIdToken();
-  } else if (currentUser) {
-    token = await currentUser.getIdToken();
+    const session = await authClient.getSession();
+    if (session.error) throw session.error;
+    token = session.data?.session?.token || null;
+    if (!token) throw new Error("Please sign in to access your StudyGroup data.");
   }
 
   let response;
