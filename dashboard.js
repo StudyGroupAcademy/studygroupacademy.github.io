@@ -19,7 +19,7 @@ import {
   saveProfileChoices,
   takeWelcomeFlag
 } from "./session.js";
-import { exportData, initWorkspaceUI, startWorkspace, stopWorkspace } from "./workspace.js";
+import { exportData, initWorkspaceUI } from "./workspace.js";
 
 const profileDialog = $("#profile-dialog");
 const profileForm = $("#profile-form");
@@ -118,7 +118,6 @@ async function loadUser(user) {
   const account = user.uid === uid ? user : { ...user, uid };
   state.user = account;
   state.profile = null;
-  stopWorkspace();
   try {
     const profile = await ensureUserProfile(account);
     if (token !== loadToken) return;
@@ -126,7 +125,7 @@ async function loadUser(user) {
     renderAccount();
     void setLessonUser(account);
     revealPage();
-    startWorkspace();
+    initWorkspaceUI();
     void startSchoolPortal(account, profile);
     await refreshBoard();
     showBanner(`Welcome${profile.displayName ? `, ${profile.displayName}` : ""}. Your account is ready.`);
@@ -310,7 +309,6 @@ authClient.getSession().then((result) => {
   const authUser = result.data?.user;
   const user = authUser ? { ...authUser, uid: authUser.id, displayName: authUser.name } : null;
   if (!user) {
-    stopWorkspace();
     leaveToLanding();
     return;
   }
