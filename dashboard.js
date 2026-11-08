@@ -37,19 +37,22 @@ export async function initDashboard() {
   }
 
   try {
-    const sessionResult = await authClient.getSession();
+    const sessionPromise = authClient.getSession();
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Auth timeout")), 3000));
+    
+    const sessionResult = await Promise.race([sessionPromise, timeoutPromise]);
     currentUser = sessionResult.data?.user || null;
   } catch (err) {
     currentUser = null;
   }
 
+  document.body.classList.remove("checking");
+
   if (!currentUser) {
-    document.body.classList.remove("checking");
     renderSignedOut();
     return;
   }
 
-  document.body.classList.remove("checking");
   await handleSignedInUser(currentUser);
 }
 
@@ -356,7 +359,7 @@ async function openProfileDialog(isWelcome) {
 
   const intro = $("#profile-intro");
   if (intro) {
-    intro.textContent = isWelcome ? "Welcome! Set your preferences to get started." : "Update your profile and exam boards.";
+    intro.textContent = isWelcome ? "Welcome! Set your preferences to get started." : "Update your profile and account settings.";
   }
 
   try {
@@ -797,9 +800,7 @@ async function loadAllPanelData() {
   ]);
 }
 
-function startRealtimeListeners() {
-  // Realtime listeners can be registered here if needed
-}
+function startRealtimeListeners() {}
 
 async function loadStats() {
   if (!currentUser) return;
