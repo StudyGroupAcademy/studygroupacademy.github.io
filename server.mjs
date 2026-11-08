@@ -364,6 +364,21 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/schools") {
+      if (request.method !== "POST") throw new Error("Method not allowed.");
+      if (!identity) throw new Error("Unauthorized.");
+      
+      const body = await readJson(request);
+      
+      await pool.query(
+        `INSERT INTO school_applications (user_id, data, created_at) VALUES ($1, $2::jsonb, now())`,
+        [identity.id, JSON.stringify(body)]
+      );
+
+      sendJson(response, 200, { ok: true, message: "School application submitted successfully." }, origin);
+      return;
+    }
+
     sendJson(response, 404, { error: "Not found" }, origin);
   } catch (error) {
     console.error("API error:", error);
