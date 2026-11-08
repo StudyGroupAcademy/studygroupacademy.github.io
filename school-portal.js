@@ -179,6 +179,10 @@ function renderTeachers(teachers = []) {
 
 function configureMember(member) {
   const isSchoolAccount = Boolean(member);
+  const accountBadge = $("#account-badge");
+  if (accountBadge) accountBadge.textContent = isSchoolAccount
+    ? member.role.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : "Personal account";
   $("#school-portal").hidden = !isSchoolAccount;
   $("#school-application-state").hidden = isSchoolAccount;
   $("#school-title").textContent = isSchoolAccount ? member.school_name : "School accounts";

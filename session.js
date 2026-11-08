@@ -22,11 +22,25 @@ export async function ensureUserProfile(user) {
   const userDocRef = doc(null, "users", uid);
   const snapshot = await getDoc(userDocRef);
 
+  const authName = String(
+    user.name || user.displayName || user.user_metadata?.full_name || user.email?.split("@")[0] || "Learner"
+  ).trim();
+
   if (snapshot.exists()) {
-    return snapshot.data();
+    const existingProfile = snapshot.data() || {};
+    const isPlaceholder = (value) => !value || ["learner", "student", "user"].includes(String(value).trim().toLowerCase());
+    const updates = {};
+    if (isPlaceholder(existingProfile.displayName) && !isPlaceholder(authName)) updates.displayName = authName;
+    if (isPlaceholder(existingProfile.nickname) && !isPlaceholder(authName)) updates.nickname = authName;
+    if (Object.keys(updates).length) {
+      updates.updatedAt = new Date().toISOString();
+      await updateDoc(userDocRef, updates);
+      return { ...existingProfile, ...updates };
+    }
+    return existingProfile;
   }
 
-  const displayName = user.name || user.displayName || user.email?.split("@")[0] || "Learner";
+  const displayName = authName;
   const defaultProfile = {
     uid,
     displayName,

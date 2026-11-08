@@ -2,6 +2,7 @@ import { authClient, getAuthToken } from "./auth-client.js";
 import { $, $$, db, getErrorMessage, setFormError, showBanner, showToast } from "./core.js";
 import { doc, serverTimestamp, setDoc } from "./firestore-client.js";
 import { cleanNickname, consumeOAuthCallback, describeOAuthError, validNickname } from "./helpers.js";
+import { ensureUserProfile } from "./session.js";
 import { initLeaderboard, loadLeaderboard } from "./leaderboard.js";
 import { initResourceFilter } from "./resources.js";
 import { schoolRequest } from "./school-client.js";
@@ -104,7 +105,7 @@ authForm.addEventListener("submit", async (event) => {
       const result = await authClient.signIn.email({ email, password });
       if (result.error) throw result.error;
     }
-    const session = await refreshAuthState();
+    const session = await refreshAuthState({ loadProfile: authMode !== "signup" });
     if (authMode === "signup" && session?.user?.id) {
       await setDoc(doc(db, "users", session.user.id), {
         displayName,
@@ -205,26 +206,37 @@ if (window.location.protocol === "file:") {
   showBanner("Open StudyGroup through a web server. Sign-in does not work from a file.", true);
 }
 
-function renderAuthState(user) {
+function renderAuthState(user, profile = null) {
   authAccount.hidden = !user;
   $$("[data-open-auth]").forEach((button) => {
     button.hidden = Boolean(user);
   });
-  $("#auth-account-name").textContent = user?.name || user?.email || "";
-  $("#auth-dashboard-link").hidden = !user;
+  const accountName = profile?.nickname || profile?.displayName || user?.name || user?.email || "";
+  $("#auth-account-name").textContent = accountName;
+  $("#auth-dashboard-link").hidden = true;
 }
 
-async function refreshAuthState() {
+async function refreshAuthState({ loadProfile = true } = {}) {
   const result = await authClient.getSession();
   if (result.error) throw result.error;
-  renderAuthState(result.data?.user || null);
-  return result.data?.session || null;
+  const sessionData = result.data || null;
+  const user = sessionData?.user || null;
+  let profile = null;
+  if (user && loadProfile) {
+    try { profile = await ensureUserProfile(user); }
+    catch (error) { console.warn("The signed-in account profile could not be loaded.", error); }
+  }
+  renderAuthState(user, profile);
+  return sessionData;
 }
 
 $("#auth-sign-out").addEventListener("click", async () => {
   try {
     const result = await authClient.signOut();
-    if (result.error) throw result.error;
+    if (result?.error) throw result.error;
+    const sessionResult = await authClient.getSession();
+    if (sessionResult?.error) throw sessionResult.error;
+    if (sessionResult.data?.user) throw new Error("Your session is still active. Please try logging out again.");
     renderAuthState(null);
     showToast("You have been signed out.");
   } catch (error) {

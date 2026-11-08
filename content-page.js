@@ -325,8 +325,11 @@ async function renderSidebarAccount() {
     container.querySelector("#course-sign-out").addEventListener("click", async () => {
       try {
         const signedOut = await authClient.signOut();
-        if (signedOut.error) throw signedOut.error;
-        window.location.assign("/");
+        if (signedOut?.error) throw signedOut.error;
+        const sessionResult = await authClient.getSession();
+        if (sessionResult?.error) throw sessionResult.error;
+        if (sessionResult.data?.user) throw new Error("Your session is still active. Please try logging out again.");
+        window.location.assign(new URL("/", window.location.origin).toString());
       } catch (error) {
         console.error("Could not sign out from the subject library.", error);
         container.insertAdjacentHTML("beforeend", `<p class="course-account-error">${escapeHtml(error.message || "Sign out failed. Please try again.")}</p>`);

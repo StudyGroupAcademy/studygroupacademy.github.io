@@ -87,6 +87,8 @@ function renderSignedIn(profile) {
   if (emailElem) emailElem.textContent = currentUser?.email || "";
   const handleElem = $("#account-handle");
   if (handleElem) handleElem.textContent = `@${profile.handle || "user"}`;
+  const accountBadge = $("#account-badge");
+  if (accountBadge) accountBadge.textContent = "Personal account";
   
   const tagElem = $("#workspace-name-tag");
   if (tagElem) {
@@ -148,8 +150,24 @@ function bindNavigation() {
   const signOutBtn = $("#sign-out");
   if (signOutBtn) {
     signOutBtn.addEventListener("click", async () => {
-      await authClient.signOut();
-      window.location.href = "./";
+      signOutBtn.disabled = true;
+      try {
+        const result = await authClient.signOut();
+        if (result?.error) throw result.error;
+        const sessionResult = await authClient.getSession();
+        if (sessionResult?.error) throw sessionResult.error;
+        if (sessionResult.data?.user) {
+          throw new Error("Your session is still active. Please try logging out again.");
+        }
+        state.user = null;
+        state.profile = null;
+        currentUser = null;
+        window.location.replace(new URL("../", window.location.href).toString());
+      } catch (error) {
+        console.error("StudyGroup sign-out failed.", error);
+        showBanner(error.message || "We couldn't sign you out. Please try again.", true);
+        signOutBtn.disabled = false;
+      }
     });
   }
 
