@@ -1,4 +1,4 @@
-import { authClient } from "./auth-client.js";
+import { auth } from "./firestore-client.js";
 
 const API_URL = "https://studygroupacademy-github-io.onrender.com/api/data";
 const SERVER_TIMESTAMP = "__studygroupServerTimestamp";
@@ -42,11 +42,15 @@ function decodeValue(value) {
 
 async function request(payload, allowAnonymous = false) {
   let token = null;
+  const currentUser = auth.currentUser;
+
   if (!allowAnonymous) {
-    const session = await authClient.getSession();
-    if (session.error) throw session.error;
-    token = session.data?.session?.token || null;
-    if (!token) throw new Error("Please sign in to access your StudyGroup data.");
+    if (!currentUser) {
+      throw new Error("Please sign in to access your StudyGroup data.");
+    }
+    token = await currentUser.getIdToken();
+  } else if (currentUser) {
+    token = await currentUser.getIdToken();
   }
 
   let response;
