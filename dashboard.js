@@ -2,7 +2,7 @@ import { authClient, getCurrentSession, getSessionUser } from "./auth-client.js"
 import { addDoc, arrayUnion, collection, completeActivity, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, syncLeaderboardXp, updateDoc, where } from "./firestore-client.js";
 import { $, $$, db, state, showBanner } from "./core.js";
 import { ensureUserProfile, saveDailyGoal, saveProfileChoices, takeWelcomeFlag } from "./session.js";
-import { consumeOAuthCallback, describeOAuthError } from "./helpers.js";
+import { computeBadges, computeStats, consumeOAuthCallback, describeOAuthError } from "./helpers.js";
 import { initResourceFilter, setLessonUser } from "./resources.js";
 
 const DEFAULT_SUBJECTS = ["Maths", "English", "Science", "Computer Science", "History", "Geography", "French", "Spanish"];
@@ -1058,6 +1058,7 @@ function populateSubjectDropdowns() {
 async function loadAllPanelData() {
   await Promise.all([
     loadStats(),
+    loadBadges(),
     loadTasks(),
     loadExams(),
     loadGrades(),
@@ -1068,6 +1069,50 @@ async function loadAllPanelData() {
     loadSessions(),
     loadSchoolData()
   ]);
+}
+
+async function loadBadges() {
+  if (!currentUser) return;
+  const grid = $("#badge-grid");
+  const summary = $("#badge-summary");
+  if (!grid) return;
+  grid.innerHTML = '<div class="badge-loading">Loading your achievements…</div>';
+  try {
+    const base = ["users", currentUser.uid];
+    const paths = ["sessions", "tasks", "decks", "notes", "grades", "exams"];
+    const snapshots = await Promise.all(paths.map((name) => getDocs(collection(db, ...base, name))));
+    const [sessionsSnap, tasksSnap, decksSnap, notesSnap, gradesSnap, examsSnap] = snapshots;
+    const groupsSnap = await getDocs(query(collection(db, "groups"), where("memberIds", "array-contains", currentUser.uid)));
+    const sessions = sessionsSnap.docs.map((entry) => {
+      const data = entry.data();
+      return { ...data, minutes: Number(data.minutes) || 0, date: ((data.date || data.createdAt)?.toDate ? (data.date || data.createdAt).toDate() : new Date(data.date || data.createdAt || 0)) };
+    });
+    const tasks = tasksSnap.docs.map((entry) => {
+      const data = entry.data();
+      return { ...data, done: Boolean(data.done ?? data.completed) };
+    });
+    const decks = decksSnap.docs.map((entry) => entry.data());
+    const notes = notesSnap.docs.map((entry) => entry.data());
+    const scores = gradesSnap.docs.map((entry) => entry.data());
+    const exams = examsSnap.docs.map((entry) => entry.data());
+    const groups = groupsSnap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+    const stats = computeStats(sessions, tasks.map((task) => ({ ...task, done: task.done })), new Date());
+    const goalText = String(state.profile?.dailyGoal || "30 minutes").toLowerCase();
+    const goalMatch = goalText.match(/\d+/);
+    const goal = goalText.includes("hour") ? (Number(goalMatch?.[0] || 1) * (goalText.includes("90") ? 1 : 60)) : Number(goalMatch?.[0] || 30);
+    const freshUser = await getDoc(doc(db, "users", currentUser.uid));
+    const xp = Number(freshUser.exists() ? freshUser.data().xp : state.profile?.xp) || 0;
+    const badges = computeBadges({ stats, goal, uid: currentUser.uid, optIn: Boolean(state.profile?.leaderboardOptIn), sessions, tasks, decks, notes, scores, exams, groups, xp });
+    const unlocked = badges.filter((badge) => badge.unlocked).length;
+    if (summary) summary.textContent = `${unlocked} of ${badges.length} achievements unlocked · Keep learning to collect more.`;
+    const symbols = { "first-focus": "◷", "hour-power": "⌛", "ten-hours": "◴", "streak-3": "↗", "streak-7": "✦", "goal-getter": "◎", "task-starter": "✓", "task-master": "▤", "deck-builder": "▱", "card-collector": "▦", "note-taker": "✎", "score-keeper": "%", "exam-ready": "◇", "team-player": "⌂", "group-founder": "♧", "on-the-board": "↟", "first-xp": "✧", "bright-spark": "✦", "quick-thinker": "⚡", "scholar": "◆", "study-star": "★" };
+    grid.innerHTML = badges.map((badge) => `<article class="badge${badge.unlocked ? " is-unlocked" : " is-locked"}"><span class="badge-icon" aria-hidden="true">${symbols[badge.id] || "✧"}</span><div class="badge-copy"><strong>${escapeHtml(badge.title)}</strong><small>${escapeHtml(badge.text)}</small></div><div class="badge-progress"><span>${escapeHtml(badge.progress)}</span><i><b style="width:${Math.min(100, Math.max(0, (Number(badge.value) / Math.max(1, Number(badge.target))) * 100))}%"></b></i></div><em>${badge.unlocked ? "Unlocked" : "In progress"}</em></article>`).join("");
+  } catch (error) {
+    console.error("Failed to load achievements:", error);
+    if (summary) summary.textContent = "Your achievements could not be loaded right now.";
+    grid.innerHTML = '<div class="badge-empty"><strong>Achievements temporarily unavailable</strong><span>Check your connection and try again.</span><button type="button" class="button button-light" id="retry-badges">Try again</button></div>';
+    $("#retry-badges")?.addEventListener("click", loadBadges);
+  }
 }
 
 async function loadStats() {

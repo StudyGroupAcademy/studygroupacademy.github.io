@@ -22,7 +22,7 @@ function renderCourseNavigation() {
     <a class="course-side-brand" href="/dashboard/" aria-label="StudyGroup home"><img src="/assets/wordmark.png" alt="StudyGroup"></a>
     <a class="course-side-home" href="/dashboard/">← My study space</a>
     <p>SUBJECTS</p>
-    ${courses.map((item) => `<a class="course-side-link${item.slug === course.slug ? " is-current" : ""}" href="/content/${item.slug}/notes/"${item.slug === course.slug ? ' aria-current="page"' : ""} title="${escapeHtml(item.title)}"><span class="course-side-icon ${item.tone}">${escapeHtml(item.icon)}</span><span class="course-side-name">${escapeHtml(item.title)}</span></a>`).join("")}
+    ${courses.map((item) => `<a class="course-side-link${item.slug === course?.slug ? " is-current" : ""}" href="/content/${item.slug}/notes/"${item.slug === course?.slug ? ' aria-current="page"' : ""} title="${escapeHtml(item.title)}"><span class="course-side-icon ${item.tone}">${escapeHtml(item.icon)}</span><span class="course-side-name">${escapeHtml(item.title)}</span></a>`).join("")}
     <div class="course-sidebar-account" id="course-sidebar-account"><a href="/?auth=signin">Sign in to your account</a></div>
   </nav>`;
 }
@@ -76,9 +76,49 @@ function renderWorksheets() {
   </article>`).join("")}</div>`;
 }
 
-if (!course || !["notes", "worksheets"].includes(pageType) || (topicSlug && (!note || pageType !== "notes"))) {
-  document.title = "StudyGroup subject library";
-  main.innerHTML = `<header class="site-header course-header"><a class="brand" href="/"><img src="/assets/wordmark.png" alt="StudyGroup"></a><nav class="site-nav" aria-label="Main navigation"><a href="/dashboard/">My study space</a></nav></header><section class="course-not-found"><span class="eyebrow"><span></span> SUBJECT LIBRARY</span><h1>Find your next step.</h1><p>Choose a subject to open its notes and practice worksheets.</p><div class="course-not-found-links">${courses.map((item) => `<a class="course-side-link" href="/content/${item.slug}/notes/"><span class="course-side-icon ${item.tone}">${escapeHtml(item.icon)}</span>${escapeHtml(item.title)} <span>→</span></a>`).join("")}</div></section>`;
+function renderSubjectLibrary() {
+  const science = courses.filter((item) => item.group === "science");
+  const maths = courses.filter((item) => item.group === "maths");
+  const english = courses.filter((item) => item.group === "english");
+  const humanities = courses.filter((item) => item.group === "humanities");
+  const languages = courses.filter((item) => item.group === "languages");
+  const sections = [["Mathematics", maths, "Build confidence with numbers, patterns and problem solving."], ["English", english, "Strengthen reading, analysis and communication."], ["Science", science, "Understand the ideas behind the natural world."], ["Humanities & computing", humanities, "Explore people, places, evidence and technology."], ["Languages", languages, "Develop vocabulary and confident communication."]].filter(([, items]) => items.length);
+  document.title = "Explore subjects | StudyGroup";
+  main.innerHTML = `<div class="course-layout course-library-layout">${renderCourseNavigation()}<section class="course-main course-library-home">
+    <div class="library-topline"><a href="/dashboard/">← My study space</a><span>STUDYGROUP SUBJECT LIBRARY</span></div>
+    <section class="library-hero"><div class="library-hero-copy"><span class="eyebrow"><span></span> YOUR LEARNING, IN ONE PLACE</span><h1>Make your next study session count.</h1><p>Explore clear notes, guided lessons and practice worksheets, organised by subject and ready whenever you are.</p><a class="library-hero-link" href="#library-subjects">Explore subjects <span>↓</span></a></div><div class="library-hero-art" aria-hidden="true"><div class="library-art-sheet"><span>SG / STUDY NOTES</span><i></i><i></i><i></i><b>01</b></div><div class="library-art-stamp">LEARN<br>STEP BY<br>STEP</div><div class="library-art-orbit"></div></div></section>
+    <div class="library-overview-stats"><article><strong>${courses.length}</strong><span>Subjects</span></article><article><strong>${courses.reduce((sum, item) => sum + item.notes.length, 0)}</strong><span>Notes & lessons</span></article><article><strong>${courses.reduce((sum, item) => sum + item.worksheets.length, 0)}</strong><span>Worksheets</span></article><article><strong>Free</strong><span>Always to explore</span></article></div>
+    <section class="library-subject-section" id="library-subjects"><div class="library-section-heading"><div><span class="eyebrow"><span></span> THE SUBJECT COLLECTION</span><h2>What are you studying today?</h2><p>Choose a subject to find your notes and practice.</p></div><label class="library-search"><span>⌕</span><input id="subject-search" type="search" placeholder="Search subjects…" aria-label="Search subjects"></label></div>
+      ${sections.map(([title, items, description]) => `<section class="library-category" data-library-category><div class="library-category-heading"><div><h3>${title}</h3><p>${description}</p></div><span>${items.length} ${items.length === 1 ? "subject" : "subjects"}</span></div><div class="library-subject-grid">${items.map((item) => `<article class="library-subject-card" data-subject-card data-search="${escapeHtml(`${item.title} ${item.description}`.toLowerCase())}"><a class="library-card-main" href="/content/${item.slug}/notes/"><span class="library-card-icon ${item.tone}">${escapeHtml(item.icon)}</span><span class="library-card-copy"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.description)}</small></span><span class="library-card-arrow">↗</span></a><div class="library-card-footer"><a href="/content/${item.slug}/notes/">${item.notes.length} ${item.notes.length === 1 ? "note" : "notes"}</a><a href="/content/${item.slug}/worksheets/">${item.worksheets.length} ${item.worksheets.length === 1 ? "worksheet" : "worksheets"}</a></div></article>`).join("")}</div></section>`).join("")}
+      <div class="library-no-results" id="subject-no-results" hidden>No subjects match that search. Try another word.</div>
+    </section><footer class="library-footer"><span>STUDYGROUP ACADEMY</span><span>Small steps. Strong foundations.</span><a href="/dashboard/">Back to your study space ↑</a></footer>
+  </section></div>`;
+  void renderSidebarAccount();
+  const search = document.querySelector("#subject-search");
+  search?.addEventListener("input", () => {
+    const term = search.value.trim().toLowerCase();
+    let visible = 0;
+    document.querySelectorAll("[data-library-category]").forEach((section) => {
+      let count = 0;
+      section.querySelectorAll("[data-subject-card]").forEach((card) => {
+        const show = !term || card.dataset.search.includes(term);
+        card.hidden = !show;
+        if (show) count += 1;
+      });
+      section.hidden = count === 0;
+      visible += count;
+    });
+    const empty = document.querySelector("#subject-no-results");
+    if (empty) empty.hidden = visible !== 0;
+  });
+}
+
+if (window.location.pathname.replace(/\/+$/, "") === "/content" || !course || !["notes", "worksheets"].includes(pageType) || (topicSlug && (!note || pageType !== "notes"))) {
+  if (window.location.pathname.replace(/\/+$/, "") === "/content") renderSubjectLibrary();
+  else {
+    document.title = "StudyGroup subject library";
+    main.innerHTML = `<header class="site-header course-header"><a class="brand" href="/"><img src="/assets/wordmark.png" alt="StudyGroup"></a><nav class="site-nav" aria-label="Main navigation"><a href="/dashboard/">My study space</a></nav></header><section class="course-not-found"><span class="eyebrow"><span></span> SUBJECT LIBRARY</span><h1>Find your next step.</h1><p>Choose a subject to open its notes and practice worksheets.</p><div class="course-not-found-links">${courses.map((item) => `<a class="course-side-link" href="/content/${item.slug}/notes/"><span class="course-side-icon ${item.tone}">${escapeHtml(item.icon)}</span>${escapeHtml(item.title)} <span>→</span></a>`).join("")}</div></section>`;
+  }
 } else {
   const label = topicSlug ? "Lesson" : pageType === "notes" ? "Notes" : "Worksheets";
   document.title = `${topicSlug ? note.title : `${course.title} ${label}`} | StudyGroup`;

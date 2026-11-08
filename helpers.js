@@ -294,7 +294,12 @@ export function computeBadges(input) {
     ["exam-ready", "Exam ready", "Add an exam date.", input.exams.length, 1],
     ["team-player", "Team player", "Join a study group.", input.groups.length, 1],
     ["group-founder", "Group founder", "Start your own group.", ownsGroup ? 1 : 0, 1],
-    ["on-the-board", "On the board", "Join the leaderboard.", input.optIn ? 1 : 0, 1]
+    ["on-the-board", "On the board", "Join the leaderboard.", input.optIn ? 1 : 0, 1],
+    ["first-xp", "First steps", "Earn your first 10 XP from a completed learning activity.", Number(input.xp) || 0, 10],
+    ["bright-spark", "Bright Spark", "Earn 30 XP across your learning activities.", Number(input.xp) || 0, 30],
+    ["quick-thinker", "Quick Thinker", "Earn 100 XP across your learning activities.", Number(input.xp) || 0, 100],
+    ["scholar", "Scholar", "Earn 250 XP across your learning activities.", Number(input.xp) || 0, 250],
+    ["study-star", "Study Star", "Earn 500 XP across your learning activities.", Number(input.xp) || 0, 500]
   ];
   return definitions.map(([id, title, text, value, target]) => ({
     id,
