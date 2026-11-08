@@ -418,6 +418,33 @@ function bindProfileDialog() {
     });
   }
 
+  const boardGrid = $("#onboarding-board-grid");
+  const boardOptions = ["AQA", "Edexcel", "Pearson Edexcel", "OCR", "WJEC", "Eduqas", "CCEA", "Other", "Not sure yet"];
+  const onboardingSubjects = ["Maths", "English Language", "English Literature", "Biology", "Chemistry", "Physics", "Combined Science", "Computer Science", "History", "Geography", "French", "Spanish"];
+  if (boardGrid && !boardGrid.dataset.ready) {
+    boardGrid.innerHTML = onboardingSubjects.map((subject) => `<label>${subject}<select name="board:${subject}"><option value="">Choose exam board</option>${boardOptions.map((board) => `<option value="${board}">${board}</option>`).join("")}</select></label>`).join("");
+    boardGrid.dataset.ready = "true";
+  }
+
+  const skipButton = $("#skip-onboarding");
+  if (skipButton) skipButton.addEventListener("click", async () => {
+    if (!currentUser) return;
+    const data = new FormData(form);
+    const nickname = String(data.get("nickname") || currentUser.name || currentUser.email?.split("@")[0] || "StudyGroup student").trim();
+    const displayName = String(data.get("displayName") || nickname).trim();
+    const handle = String(data.get("handle") || `student_${String(currentUser.uid).slice(-4)}`).trim().toLowerCase();
+    const error = $("#profile-error");
+    try {
+      skipButton.disabled = true;
+      const boards = Object.fromEntries(onboardingSubjects.map((subject) => [subject, String(data.get(`board:${subject}`) || "")]).filter(([, value]) => value));
+      await saveProfileChoices({ nickname, displayName, handle, bio: String(data.get("bio") || ""), boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "" }, data.get("leaderboardOptIn") === "on");
+      dialog.close();
+      await handleSignedInUser(currentUser);
+    } catch (err) {
+      if (error) { error.hidden = false; error.textContent = err.message || "Couldn't save your preferences."; }
+    } finally { skipButton.disabled = false; }
+  });
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!currentUser) return;
@@ -427,11 +454,12 @@ function bindProfileDialog() {
     const handle = data.get("handle").trim().toLowerCase();
     const bio = data.get("bio").trim();
     const optIn = data.get("leaderboardOptIn") === "on";
+    const boards = Object.fromEntries(onboardingSubjects.map((subject) => [subject, String(data.get(`board:${subject}`) || "")]).filter(([, value]) => value));
 
     const errBox = $("#profile-error");
     try {
       if (errBox) errBox.hidden = true;
-      await saveProfileChoices({ nickname, displayName, handle, bio }, optIn);
+      await saveProfileChoices({ nickname, displayName, handle, bio, boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "" }, optIn);
       dialog.close();
       const snapshot = await getDoc(doc(db, "users", currentUser.uid));
       if (snapshot.exists()) {
@@ -465,6 +493,13 @@ async function openProfileDialog(isWelcome) {
       if (form.elements["handle"]) form.elements["handle"].value = data.handle || "";
       if (form.elements["bio"]) form.elements["bio"].value = data.bio || "";
       if (form.elements["leaderboardOptIn"]) form.elements["leaderboardOptIn"].checked = Boolean(data.leaderboardOptIn);
+      for (const [subject, board] of Object.entries(data.boards || {})) {
+        const field = form.elements[`board:${subject}`];
+        if (field) field.value = board;
+      }
+      for (const field of ["yearGroup", "preferredStudyTime", "studyStartTime", "dailyGoal", "nextExamDate"]) {
+        if (form.elements[field]) form.elements[field].value = data[field] || "";
+      }
     }
   } catch (err) {
     console.error("Failed to load user profile for dialog:", err);
@@ -702,7 +737,34 @@ function bindNoteActions() {
       if (delBtn) delBtn.hidden = true;
     });
 
-    form.addEventListener("submit", async (e) => {
+    const boardGrid = $("#onboarding-board-grid");
+  const boardOptions = ["AQA", "Edexcel", "Pearson Edexcel", "OCR", "WJEC", "Eduqas", "CCEA", "Other", "Not sure yet"];
+  const onboardingSubjects = ["Maths", "English Language", "English Literature", "Biology", "Chemistry", "Physics", "Combined Science", "Computer Science", "History", "Geography", "French", "Spanish"];
+  if (boardGrid && !boardGrid.dataset.ready) {
+    boardGrid.innerHTML = onboardingSubjects.map((subject) => `<label>${subject}<select name="board:${subject}"><option value="">Choose exam board</option>${boardOptions.map((board) => `<option value="${board}">${board}</option>`).join("")}</select></label>`).join("");
+    boardGrid.dataset.ready = "true";
+  }
+
+  const skipButton = $("#skip-onboarding");
+  if (skipButton) skipButton.addEventListener("click", async () => {
+    if (!currentUser) return;
+    const data = new FormData(form);
+    const nickname = String(data.get("nickname") || currentUser.name || currentUser.email?.split("@")[0] || "StudyGroup student").trim();
+    const displayName = String(data.get("displayName") || nickname).trim();
+    const handle = String(data.get("handle") || `student_${String(currentUser.uid).slice(-4)}`).trim().toLowerCase();
+    const error = $("#profile-error");
+    try {
+      skipButton.disabled = true;
+      const boards = Object.fromEntries(onboardingSubjects.map((subject) => [subject, String(data.get(`board:${subject}`) || "")]).filter(([, value]) => value));
+      await saveProfileChoices({ nickname, displayName, handle, bio: String(data.get("bio") || ""), boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "" }, data.get("leaderboardOptIn") === "on");
+      dialog.close();
+      await handleSignedInUser(currentUser);
+    } catch (err) {
+      if (error) { error.hidden = false; error.textContent = err.message || "Couldn't save your preferences."; }
+    } finally { skipButton.disabled = false; }
+  });
+
+  form.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!currentUser) return;
       const data = new FormData(form);

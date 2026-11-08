@@ -1038,3 +1038,14 @@ body { font-size: 16px; line-height: 1.55; }
   z-index: 100;
   overflow-y: auto;
 }
+
+#signup-name-label[hidden] { display: none !important; }
+#profile-dialog .onboarding-section { display: grid; gap: 13px; margin-top: 5px; padding-top: 17px; border-top: 1px solid #eeeae1; }
+#profile-dialog .signup-board-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+#profile-dialog .signup-board-grid label, #profile-dialog .onboarding-preferences label { display: grid; gap: 6px; color: #55554e; font-size: 12px; font-weight: 600; }
+#profile-dialog .signup-board-grid select, #profile-dialog .onboarding-preferences select, #profile-dialog .onboarding-preferences input { width: 100%; min-width: 0; min-height: 42px; border: 1px solid #e8e5dc; border-radius: 9px; padding: 8px 11px; background: #fbfaf7; color: #34342f; font: inherit; font-size: 13px; }
+#profile-dialog .signup-board-grid select:focus, #profile-dialog .onboarding-preferences select:focus, #profile-dialog .onboarding-preferences input:focus { outline: 2px solid #e8c987; outline-offset: 1px; border-color: #d5a856; }
+#profile-dialog .onboarding-preferences { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+#profile-dialog .onboarding-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 5px; }
+#profile-dialog .onboarding-actions .dialog-submit { margin: 0; }
+@media (max-width: 520px) { #profile-dialog .signup-board-grid, #profile-dialog .onboarding-preferences { grid-template-columns: 1fr; } #profile-dialog .onboarding-actions { flex-direction: column-reverse; align-items: stretch; } }

@@ -28,6 +28,9 @@ function setAuthMode(mode) {
       : "Create your personal StudyGroup learner account."
     : "Log in to your free StudyGroup account.";
   authForm.elements.password.autocomplete = signingUp ? "new-password" : "current-password";
+  const nameLabel = $("#signup-name-label");
+  if (nameLabel) nameLabel.hidden = !signingUp;
+  authForm.elements.displayName.required = signingUp;
   $("#auth-submit").innerHTML = signingUp
     ? "Create my free account <span>→</span>"
     : "Log in to StudyGroup <span>→</span>";
@@ -99,7 +102,8 @@ authForm.addEventListener("submit", async (event) => {
     const callbackURL = new URL("/dashboard/", window.location.origin);
     if (inviteToken) callbackURL.searchParams.set("invite", inviteToken);
     if (authMode === "signup") {
-      displayName = cleanNickname(email.split("@")[0]).replace(/[^A-Za-z0-9 _.-]/g, "").slice(0, 24) || "Learner";
+      displayName = cleanNickname(String(values.get("displayName") || "").trim()).replace(/[^A-Za-z0-9 _.-]/g, "").slice(0, 60);
+      if (displayName.length < 2) throw new Error("Please enter a name with at least 2 characters.");
       const result = await authClient.signUp.email({ name: displayName, email, password, callbackURL: callbackURL.toString() });
       if (result.error) throw result.error;
       accountCreated = true;

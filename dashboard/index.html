@@ -307,10 +307,21 @@
         <label>Your account name<input name="displayName" type="text" minlength="2" maxlength="60" autocomplete="name" required /></label>
         <label>Your handle<input name="handle" type="text" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" placeholder="yourname_1234" autocomplete="username" required /><small class="form-hint">Shown with an @. A short account-specific suffix is added to new handles.</small></label>
         <label>A short bio<textarea name="bio" maxlength="240" rows="3" placeholder="A little about what you are learning…"></textarea></label>
+        <section class="onboarding-section" aria-labelledby="learning-setup-title">
+          <div class="profile-intro-grid"><span class="profile-step">02</span><span><strong id="learning-setup-title">Set up your learning</strong><small>Choose your subjects and exam boards. You can change these later.</small></span></div>
+          <div class="signup-board-grid" id="onboarding-board-grid"></div>
+          <div class="onboarding-preferences">
+            <label>Year group<select name="yearGroup"><option value="">Choose year group</option><option>Year 7</option><option>Year 8</option><option>Year 9</option><option>Year 10</option><option>Year 11</option><option>Year 12</option><option>Year 13</option></select></label>
+            <label>Preferred study period<select name="preferredStudyTime"><option value="">Choose a time</option><option value="morning">Morning</option><option value="afternoon">Afternoon</option><option value="evening">Evening</option><option value="flexible">No preference</option></select></label>
+            <label>Usual study start time<input name="studyStartTime" type="time" /></label>
+            <label>Daily study goal<select name="dailyGoal"><option value="">Choose a goal</option><option value="15 minutes">15 minutes</option><option value="30 minutes">30 minutes</option><option value="45 minutes">45 minutes</option><option value="1 hour">1 hour</option><option value="90 minutes">90 minutes</option></select></label>
+            <label>Next exam date<input name="nextExamDate" type="date" /></label>
+          </div>
+        </section>
         <label class="opt-in-field"><input name="leaderboardOptIn" type="checkbox" /><span><strong>Show my nickname on the leaderboard</strong><small>One friendly daily check-in. Opt out whenever you like.</small></span></label>
         <button class="button button-light" id="link-google" type="button">Connect Google</button>
         <small class="form-hint">If Google sign-in says your account is not linked, first log in here with your StudyGroup email and password, then connect Google.</small>
-        <button class="button button-dark dialog-submit" type="submit">Save my preferences <span>→</span></button>
+        <div class="onboarding-actions"><button class="button button-light" id="skip-onboarding" type="button">Skip for now</button><button class="button button-dark dialog-submit" type="submit">Save my preferences <span>→</span></button></div>
       </form>
     </dialog>
 
