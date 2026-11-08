@@ -19,7 +19,6 @@
       <a class="brand" href="./" aria-label="StudyGroup dashboard"><img src="../assets/wordmark.png" alt="StudyGroup" /></a>
       <nav class="site-nav" aria-label="Main navigation">
         <a href="#workspace">My workspace</a>
-        <a href="#resources">Free resources</a>
       </nav>
     </header>
 
@@ -50,7 +49,6 @@
             <button class="tab" type="button" role="tab" data-tab="school" aria-selected="false" id="school-tab"><span>⌂</span> School</button>
             <button class="tab" type="button" role="tab" data-tab="leaderboard" aria-selected="false"><span>✳</span> Community</button>
             <button class="tab" type="button" role="tab" data-tab="badges" aria-selected="false"><span>☆</span> Badges</button>
-            <a class="tab-side-link" href="../content/"><span>▧</span> Subject library</a>
             <div class="sidebar-account">
               <div class="signed-in-menu" id="signed-in-menu">
                 <button class="user-chip" id="account-toggle" type="button" aria-expanded="false"><span class="user-chip-avatar" id="header-initial">S</span><span class="user-chip-name"><span id="header-name">Learner</span><span class="earned-name-tag" id="header-name-tag" hidden></span></span><span class="account-chevron" aria-hidden="true"></span></button>
@@ -70,7 +68,7 @@
           <div class="panel" data-panel="overview">
             <div class="study-home-layout">
               <section class="subject-shelf">
-                <div class="subject-shelf-heading"><div><span class="eyebrow"><span></span> YOUR SUBJECTS</span><h3>Pick up where you like.</h3><p>Original, free StudyGroup lessons with worked examples and quick checks.</p></div><a href="#resources">Browse all lessons <span>→</span></a></div>
+                <div class="subject-shelf-heading"><div><span class="eyebrow"><span></span> YOUR SUBJECTS</span><h3>Pick up where you like.</h3><p>Original, free StudyGroup lessons with worked examples and quick checks.</p></div></div>
                 <div class="subject-course-grid" id="subject-course-grid"></div>
               </section>
               <aside class="study-today">
@@ -294,15 +292,6 @@
           </div>
         </div>
       </section>
-
-      <section class="resources-section" id="resources">
-        <div class="resources-heading"><div><span class="eyebrow"><span></span> MADE HERE, FOR YOUR NEXT STEP</span><h2>Small lessons.<br /><span>Real understanding.</span></h2></div><p>StudyGroup mini-lessons are written for this platform: clear explanations, worked examples and quick checks with answers. This is a growing starter library, not a complete exam-board course.</p></div>
-        <div class="resource-tools"><div class="filter-row"><button class="chip is-active" type="button" data-resource-filter="all">All</button><button class="chip" type="button" data-resource-filter="maths">Maths</button><button class="chip" type="button" data-resource-filter="science">Science</button><button class="chip" type="button" data-resource-filter="english">English</button><button class="chip" type="button" data-resource-filter="humanities">Humanities</button><button class="chip" type="button" data-resource-filter="languages">Languages</button></div><input class="resource-search" id="resource-search" type="search" placeholder="Search resources" aria-label="Search resources" /></div>
-        <p id="lesson-library-status" class="resource-library-status" role="status" aria-live="polite"></p>
-        <div class="resource-picks" id="resource-picks"></div>
-        <p class="resource-empty" id="resource-empty" hidden>No resources match that yet. Try another subject or clear the search.</p>
-        <p class="resource-disclaimer">Original StudyGroup learning material. Check your exam board's specification and your teacher's guidance for complete course coverage.</p>
-      </section>
     </main>
 
     <footer class="site-footer"><a class="brand footer-brand" href="./"><img src="../assets/wordmark.png" alt="StudyGroup" /></a><span>Built for curious minds, one student at a time.</span><span>Your nickname stays yours <b>✳</b></span></footer>
@@ -319,22 +308,6 @@
         <label>Your account name<input name="displayName" type="text" minlength="2" maxlength="60" autocomplete="name" required /></label>
         <label>Your handle<input name="handle" type="text" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" placeholder="yourname_1234" required /><small class="form-hint">Shown with an @. A short account-specific suffix is added to new handles.</small></label>
         <label>A short bio<textarea name="bio" maxlength="240" rows="3" placeholder="A little about what you are learning…"></textarea></label>
-        <div class="profile-intro-grid"><span class="profile-step">02</span><span><strong>Set your course details</strong><small>Choose the exam boards that match your subjects.</small></span></div>
-        <fieldset class="profile-boards"><legend>My exam boards</legend>
-          <div class="signup-board-grid">
-            <label>Mathematics<select name="board-maths"><option value="">Not set</option><option>AQA</option><option>Edexcel</option><option>OCR</option><option>WJEC</option><option>CCEA</option></select></label>
-            <label>English Language<select name="board-english-language"><option value="">Not set</option><option>AQA</option><option>Edexcel</option><option>OCR</option><option>WJEC</option><option>CCEA</option></select></label>
-            <label>English Literature<select name="board-english-literature"><option value="">Not set</option><option>AQA</option><option>Edexcel</option><option>OCR</option><option>WJEC</option><option>CCEA</option></select></label>
-            <label>Biology<select name="board-biology"><option value="">Not set</option><option>AQA</option><option>Edexcel</option><option>OCR</option><option>WJEC</option><option>CCEA</option></select></label>
-            <label>Chemistry<select name="board-chemistry"><option value="">Not set</option><option>AQA</option><option>Edexcel</option><option>OCR</option><option>WJEC</option><option>CCEA</option></select></label>
-            <label>Physics<select name="board-physics"><option value="">Not set</option><option>AQA</option><option>Edexcel</option><option>OCR</option><option>WJEC</option><option>CCEA</option></select></label>
-            <label>History<select name="board-history"><option value="">Not set</option><option>AQA</option><option>Edexcel</option><option>OCR</option><option>WJEC</option><option>CCEA</option></select></label>
-            <label>Geography<select name="board-geography"><option value="">Not set</option><option>AQA</option><option>Edexcel</option><option>OCR</option><option>WJEC</option><option>CCEA</option></select></label>
-            <label>Computer Science<select name="board-computer-science"><option value="">Not set</option><option>AQA</option><option>Edexcel</option><option>OCR</option><option>WJEC</option><option>CCEA</option></select></label>
-            <label>French<select name="board-french"><option value="">Not set</option><option>AQA</option><option>Edexcel</option><option>OCR</option><option>WJEC</option><option>CCEA</option></select></label>
-            <label>Spanish<select name="board-spanish"><option value="">Not set</option><option>AQA</option><option>Edexcel</option><option>OCR</option><option>WJEC</option><option>CCEA</option></select></label>
-          </div>
-        </fieldset>
         <label class="opt-in-field"><input name="leaderboardOptIn" type="checkbox" /><span><strong>Show my nickname on the leaderboard</strong><small>One friendly daily check-in. Opt out whenever you like.</small></span></label>
         <button class="button button-light" id="link-google" type="button">Connect Google</button>
         <small class="form-hint">If Google sign-in says your account is not linked, first log in here with your StudyGroup email and password, then connect Google.</small>
