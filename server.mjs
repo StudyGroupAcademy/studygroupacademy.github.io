@@ -297,13 +297,27 @@ async function dataRequest(uid, body) {
       if (profile.leaderboardOptIn) {
         const publicPath = `publicLeaderboard/${uid}`;
         const publicRecord = await record(pool, publicPath);
-        const publicData = applyFields(publicRecord?.data, {
+        const now = new Date();
+        const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+        monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+        const weekKey = monday.toISOString().slice(0, 10);
+        const monthKey = now.toISOString().slice(0, 7);
+        const yearStart = now.getUTCMonth() >= 8 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
+        const yearKey = `${yearStart}-09-01`;
+        const previous = publicRecord?.data || {};
+        const publicData = applyFields(previous, {
           uid,
           displayName: profile.displayName || "Learner",
           nickname: profile.nickname || profile.displayName || "Learner",
           handle: profile.handle || "user",
           xp: profile.xp,
-          updatedAt: new Date().toISOString()
+          xpWeekly: previous.weekKey === weekKey ? (Number(previous.xpWeekly) || 0) + award : award,
+          weekKey,
+          xpMonthly: previous.monthKey === monthKey ? (Number(previous.xpMonthly) || 0) + award : award,
+          monthKey,
+          xpYearly: previous.yearKey === yearKey ? (Number(previous.xpYearly) || 0) + award : award,
+          yearKey,
+          updatedAt: now.toISOString()
         });
         await pool.query(
           `INSERT INTO app_records (path, owner_id, data, updated_at) VALUES ($1, $2, $3::jsonb, now())

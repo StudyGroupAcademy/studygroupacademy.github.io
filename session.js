@@ -85,7 +85,12 @@ export async function saveProfileChoices(profileData, optIn) {
       displayName: profileData.displayName,
       nickname: profileData.nickname,
       handle: profileData.handle,
-      xp: 0,
+      xpWeekly: 0,
+      xpMonthly: 0,
+      xpYearly: 0,
+      weekKey: (() => { const now = new Date(); const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7)); return monday.toISOString().slice(0, 10); })(),
+      monthKey: new Date().toISOString().slice(0, 7),
+      yearKey: `${new Date().getUTCMonth() >= 8 ? new Date().getUTCFullYear() : new Date().getUTCFullYear() - 1}-09-01`,
       updatedAt: new Date().toISOString()
     }, { merge: true });
   } else {

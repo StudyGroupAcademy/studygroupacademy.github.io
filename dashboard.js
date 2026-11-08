@@ -705,23 +705,24 @@ async function completeSession(autoLogged = false) {
 }
 
 function bindLeaderboardTabs() {
-  $$("[data-board]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      $$("[data-board]").forEach((b) => b.classList.toggle("is-active", b === btn));
-      currentBoard = btn.dataset.board;
+  $$('[data-board]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      currentBoard = ['weekly', 'monthly', 'yearly'].includes(btn.dataset.board) ? btn.dataset.board : 'weekly';
+      $$('[data-board]').forEach((item) => {
+        const active = item.dataset.board === currentBoard;
+        item.classList.toggle('is-active', active);
+        item.setAttribute('aria-pressed', String(active));
+      });
       loadLeaderboard();
     });
   });
-
-  const refreshBtn = $("#refresh-leaderboard");
-  if (refreshBtn) {
-    refreshBtn.addEventListener("click", loadLeaderboard);
-  }
-
-  const joinBtn = $("#member-join button");
-  if (joinBtn) {
-    joinBtn.addEventListener("click", () => openProfileDialog(false));
-  }
+  const refreshBtn = $('#refresh-leaderboard');
+  if (refreshBtn) refreshBtn.addEventListener('click', loadLeaderboard);
+  const joinBtn = $('#member-join button');
+  if (joinBtn) joinBtn.addEventListener('click', () => openProfileDialog(false));
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('[data-retry-leaderboard]')) loadLeaderboard();
+  });
 }
 
 function bindNoteActions() {
@@ -1317,20 +1318,62 @@ function openGroupChat(code, name) {
   if (titleElem) titleElem.textContent = name;
 }
 
+function leaderboardPeriodKey(period, date = new Date()) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  if (period === 'monthly') return `${year}-${month}`;
+  if (period === 'yearly') return `${date.getUTCMonth() >= 8 ? year : year - 1}-09-01`;
+  const monday = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+  return monday.toISOString().slice(0, 10);
+}
+
 async function loadLeaderboard() {
-  const container = $("#leaderboard-list");
+  const container = $('#leaderboard-list');
   if (!container) return;
+  const refreshBtn = $('#refresh-leaderboard');
+  const period = ['weekly', 'monthly', 'yearly'].includes(currentBoard) ? currentBoard : 'weekly';
+  const field = period === 'weekly' ? 'xpWeekly' : period === 'monthly' ? 'xpMonthly' : 'xpYearly';
+  const keyField = period === 'weekly' ? 'weekKey' : period === 'monthly' ? 'monthKey' : 'yearKey';
+  const key = leaderboardPeriodKey(period);
+  const descriptions = {
+    weekly: 'XP earned since Monday. Rankings reset every Monday.',
+    monthly: 'XP earned this calendar month. Rankings reset on the 1st.',
+    yearly: 'XP earned since 1 September. Rankings reset every 1 September.'
+  };
+  const subtitle = $('#leaderboard-subtitle');
+  if (subtitle) subtitle.textContent = descriptions[period];
+  const footnote = $('#leaderboard-footnote');
+  if (footnote) footnote.textContent = `${period[0].toUpperCase()}${period.slice(1)} XP · resets automatically`;
+  if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.classList.add('is-refreshing'); }
+  container.innerHTML = '<div class="leaderboard-loading"><span class="loading-spinner"></span> Loading the rankings…</div>';
   try {
-    const snap = await getDocs(query(collection(db, "publicLeaderboard"), limit(100)));
-    const users = snap.docs.map(d => d.data()).sort((a, b) => (Number(b.xp) || 0) - (Number(a.xp) || 0)).slice(0, 10);
-    container.innerHTML = users.length ? users.map((u, index) => `
-      <div class="item-row">
-        <span><strong>#${index + 1} ${escapeHtml(u.nickname || u.displayName || "Learner")}</strong></span>
-        <span>${u.xp || 0} XP</span>
-      </div>
-    `).join("") : `<p class="muted-line">No participants on the leaderboard yet.</p>`;
+    const snap = await getDocs(query(collection(db, 'publicLeaderboard'), limit(250)));
+    const users = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((user) => user[keyField] === key && Number(user[field]) > 0)
+      .sort((a, b) => (Number(b[field]) || 0) - (Number(a[field]) || 0))
+      .slice(0, 10);
+    if (!users.length) {
+      container.innerHTML = `<div class="leaderboard-message"><span>✳</span><strong>A new ${period} starts here.</strong><p>Complete lessons and worksheets to earn XP and take the first place on this board.</p></div>`;
+    } else {
+      container.innerHTML = users.map((user, index) => {
+        const rank = index + 1;
+        const name = escapeHtml(user.displayName || user.nickname || 'Learner');
+        const current = currentUser?.uid === user.id;
+        const rankClass = rank <= 3 ? ` rank-${rank}` : '';
+        return `<article class="leaderboard-row${current ? ' is-you' : ''}"><span class="leader-rank${rankClass}">${String(rank).padStart(2, '0')}</span><span class="leader-avatar leader-avatar-${(index % 4) + 1}">${name.slice(0, 1).toUpperCase()}</span><span class="leader-student"><strong>${name}</strong><small>${current ? 'That’s you · keep it up!' : 'Making progress, one lesson at a time'}</small></span><span class="leader-points">${Number(user[field]) || 0}<small>XP</small></span></article>`;
+      }).join('');
+    }
+    const myRank = $('#my-rank');
+    if (myRank) {
+      const index = users.findIndex((user) => user.id === currentUser?.uid);
+      myRank.textContent = index >= 0 ? `You’re #${index + 1} on the ${period} leaderboard.` : state.profile?.leaderboardOptIn ? 'Earn XP this period to appear on the leaderboard.' : 'Opt in from your profile to appear on the leaderboard.';
+    }
   } catch (err) {
-    console.error("Failed to load leaderboard:", err);
+    console.error('Failed to load leaderboard:', err);
+    container.innerHTML = '<div class="leaderboard-message"><span>⌁</span><strong>We couldn’t load the leaderboard.</strong><p>Please check your connection and try again.</p><button class="leaderboard-retry" type="button" data-retry-leaderboard>Try again</button></div>';
+  } finally {
+    if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.classList.remove('is-refreshing'); }
   }
 }
 
