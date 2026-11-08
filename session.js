@@ -29,6 +29,7 @@ export async function ensureUserProfile(user) {
     leaderboardOptIn: false,
     xp: 0,
     dailyGoal: "",
+    weeklyMinutes: 0,
     onboardingComplete: false,
     createdAt: new Date().toISOString()
   };
@@ -76,6 +77,22 @@ export async function saveDailyGoal(goal) {
   const userDocRef = doc(null, "users", uid);
   await updateDoc(userDocRef, {
     dailyGoal: goal,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+export async function addWeeklyMinutes(minutes) {
+  const sessionResult = await authClient.getSession();
+  const authUser = sessionResult.data?.user;
+  if (!authUser) throw new Error("No active user session found.");
+
+  const uid = authUser.id || authUser.uid;
+  const userDocRef = doc(null, "users", uid);
+  const snapshot = await getDoc(userDocRef);
+  const currentMinutes = snapshot.exists() ? (Number(snapshot.data().weeklyMinutes) || 0) : 0;
+  
+  await updateDoc(userDocRef, {
+    weeklyMinutes: currentMinutes + minutes,
     updatedAt: new Date().toISOString()
   });
 }
