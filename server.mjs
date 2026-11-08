@@ -11,8 +11,7 @@ const cloudinary = cloudinaryPackage.v2;
 const { Pool } = pg;
 const port = Number(process.env.PORT) || 10000;
 const frontendOrigin = process.env.FRONTEND_ORIGIN;
-const authBaseUrl = process.env.NEON_AUTH_BASE_URL;
-const authJwksUrl = process.env.NEON_AUTH_JWKS_URL;
+const firebaseProjectId = process.env.FIREBASE_PROJECT_ID || "studygroup-b5135";
 const databaseUrl = process.env.DATABASE_URL;
 const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
 const cloudApiKey = process.env.CLOUDINARY_API_KEY;
@@ -22,8 +21,7 @@ const schoolAdminEmail = "mitolecule@gmail.com";
 
 const requiredConfiguration = {
   FRONTEND_ORIGIN: frontendOrigin,
-  NEON_AUTH_BASE_URL: authBaseUrl,
-  NEON_AUTH_JWKS_URL: authJwksUrl,
+  FIREBASE_PROJECT_ID: firebaseProjectId,
   DATABASE_URL: databaseUrl,
   CLOUDINARY_CLOUD_NAME: cloudName,
   CLOUDINARY_API_KEY: cloudApiKey,
@@ -45,11 +43,18 @@ const allowedOrigins = new Set(
     .map((value) => new URL(value).origin)
 );
 const allowedOrigin = frontendOrigin;
-const authIssuer = new URL(authBaseUrl).origin;
-const jwks = createRemoteJWKSet(new URL(authJwksUrl));
+const firebaseIssuer = `https://securetoken.google.com/${firebaseProjectId}`;
+const jwks = createRemoteJWKSet(new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"));
 const pool = new Pool({ connectionString: databaseUrl, max: 5 });
 const databaseSchema = await readFile(new URL("./migrations/001_initial.sql", import.meta.url), "utf8");
 await pool.query(databaseSchema);
+await pool.query(`CREATE TABLE IF NOT EXISTS firebase_auth_identities (
+  firebase_uid text PRIMARY KEY,
+  legacy_user_id text NOT NULL UNIQUE,
+  email text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+)`);
 await pool.query(`ALTER TABLE assignment_submissions ADD COLUMN IF NOT EXISTS grade numeric(5,2), ADD COLUMN IF NOT EXISTS grade_feedback text NOT NULL DEFAULT '', ADD COLUMN IF NOT EXISTS graded_by text, ADD COLUMN IF NOT EXISTS graded_at timestamptz`);
 
 const slugify = (value) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
@@ -519,13 +524,58 @@ async function authenticatedUser(request) {
 
   try {
     const { payload } = await jwtVerify(match[1], jwks, {
-      issuer: [authIssuer, authBaseUrl.replace(/\/$/, "")]
+      issuer: firebaseIssuer,
+      audience: firebaseProjectId
     });
-    return typeof payload.sub === "string" && payload.sub
-      ? { id: payload.sub, email: typeof payload.email === "string" ? payload.email.toLowerCase() : "" }
-      : null;
+    if (typeof payload.sub !== "string" || !payload.sub) return null;
+    const firebaseUid = payload.sub;
+    const email = typeof payload.email === "string" ? payload.email.toLowerCase() : "";
+    const existing = await pool.query(
+      "SELECT legacy_user_id FROM firebase_auth_identities WHERE firebase_uid = $1",
+      [firebaseUid]
+    );
+    if (existing.rowCount) {
+      let legacyUserId = existing.rows[0].legacy_user_id;
+      if (payload.email_verified === true && legacyUserId === firebaseUid && email) {
+        const legacy = await pool.query(
+          `SELECT owner_id FROM app_records
+           WHERE path LIKE 'users/%' AND lower(COALESCE(data->>'email', '')) = $1
+           ORDER BY updated_at DESC LIMIT 1`,
+          [email]
+        );
+        if (legacy.rowCount && legacy.rows[0].owner_id !== firebaseUid) {
+          const remapped = await pool.query(
+            `UPDATE firebase_auth_identities SET legacy_user_id = $2, updated_at = now()
+             WHERE firebase_uid = $1 AND NOT EXISTS (SELECT 1 FROM firebase_auth_identities WHERE legacy_user_id = $2 AND firebase_uid <> $1)
+             RETURNING legacy_user_id`,
+            [firebaseUid, legacy.rows[0].owner_id]
+          );
+          if (remapped.rowCount) legacyUserId = remapped.rows[0].legacy_user_id;
+        }
+      }
+      return { id: legacyUserId, firebaseUid, email };
+    }
+
+    let legacyUserId = firebaseUid;
+    if (payload.email_verified === true && email) {
+      const legacy = await pool.query(
+        `SELECT owner_id FROM app_records
+         WHERE path LIKE 'users/%' AND lower(COALESCE(data->>'email', '')) = $1
+         ORDER BY updated_at DESC LIMIT 1`,
+        [email]
+      );
+      if (legacy.rowCount) legacyUserId = legacy.rows[0].owner_id;
+    }
+    const mapped = await pool.query(
+      `INSERT INTO firebase_auth_identities (firebase_uid, legacy_user_id, email)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (firebase_uid) DO UPDATE SET email = EXCLUDED.email, updated_at = now()
+       RETURNING legacy_user_id`,
+      [firebaseUid, legacyUserId, email]
+    );
+    return { id: mapped.rows[0].legacy_user_id, firebaseUid, email };
   } catch (error) {
-    console.warn("Rejected an invalid Neon Auth access token.", error.code || error.name);
+    console.warn("Rejected an invalid Firebase ID token.", error.code || error.name);
     return null;
   }
 }
@@ -1033,6 +1083,16 @@ const server = createServer(async (request, response) => {
     }
 
     const identity = await authenticatedUser(request);
+
+    if (url.pathname === "/api/identity") {
+      if (request.method !== "GET") throw new Error("Method not allowed.");
+      if (!identity) {
+        sendJson(response, 401, { error: "A valid Firebase sign-in is required." }, origin);
+        return;
+      }
+      sendJson(response, 200, { uid: identity.id, email: identity.email }, origin);
+      return;
+    }
 
     if (url.pathname === "/api/data") {
       if (request.method !== "POST") throw new Error("Method not allowed.");

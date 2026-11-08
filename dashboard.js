@@ -413,7 +413,7 @@ function bindProfileDialog() {
       try {
         const callbackBase = `${window.location.origin}${window.location.pathname}`;
         if (typeof authClient.linkSocial !== "function") {
-          throw new Error("Google account linking is not available in this authentication client. Please update the Neon Auth client.");
+          throw new Error("Google account linking is not available right now.");
         }
         await authClient.linkSocial({
           provider: "google",

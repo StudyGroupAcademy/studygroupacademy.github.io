@@ -53,7 +53,7 @@ async function socialSignIn(providerName) {
     });
     if (result?.error) throw result.error;
     const redirectUrl = result?.data?.url || result?.url;
-    if (redirectUrl && window.location.href !== redirectUrl) window.location.assign(redirectUrl);
+    window.location.assign(redirectUrl || callbackURL.toString());
   } catch (error) {
     console.error(`StudyGroup ${providerName} sign-in failed.`, error);
     setFormError(errorContainer, error.message || "Sign-in could not be completed. Please try again.");
@@ -107,6 +107,7 @@ authForm.addEventListener("submit", async (event) => {
       const result = await authClient.signUp.email({ name: displayName, email, password, callbackURL: callbackURL.toString() });
       if (result.error) throw result.error;
       accountCreated = true;
+      showToast("Account created. Check your inbox to verify your email. You can continue once verification is complete.");
     } else {
       const result = await authClient.signIn.email({ email, password });
       if (result?.error) throw result.error;
@@ -114,6 +115,7 @@ authForm.addEventListener("submit", async (event) => {
     const session = await refreshAuthState({ loadProfile: authMode !== "signup", retries: 5 });
     if (authMode === "signup" && session?.user?.id) {
       await setDoc(doc(db, "users", session.user.id), {
+        email: session.user.email || email,
         displayName,
         nickname: displayName,
         handle: `${displayName.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 15) || "learner"}_${session.user.id.slice(-4)}`,
@@ -131,7 +133,7 @@ authForm.addEventListener("submit", async (event) => {
       }
     }
     if (!session?.user?.id) {
-      throw new Error("Neon Auth did not return an active browser session. Check your Neon Auth allowed website origins and make sure your browser allows cookies for the Neon Auth domain, then try again.");
+      throw new Error("Firebase could not confirm your sign-in. Please check the Firebase Authentication settings and try again.");
     }
     window.location.assign(callbackURL.toString());
   } catch (error) {
@@ -161,7 +163,7 @@ $("#forgot-password").addEventListener("click", async () => {
   try {
     const result = await authClient.requestPasswordReset({
       email,
-      redirectTo: `${window.location.origin}${window.location.pathname}`
+      continueUrl: `${window.location.origin}${window.location.pathname}`
     });
     if (result.error) throw result.error;
     setFormError(errorContainer, "");
@@ -338,9 +340,9 @@ refreshAuthState({ retries: 2 }).then((session) => {
     window.location.replace(dashboard.toString());
   }
 }).catch((error) => {
-  console.error("Could not restore the Neon Auth session.", error);
+  console.error("Could not restore the Firebase Authentication session.", error);
   renderAuthState(null);
-  showBanner("We couldn't check your Neon sign-in. Please refresh the page and try again.", true);
+  showBanner("We couldn't check your sign-in. Please refresh the page and try again.", true);
 });
 
 loadLeaderboard();

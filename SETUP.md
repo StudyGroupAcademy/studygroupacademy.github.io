@@ -1,39 +1,48 @@
 # StudyGroup Academy setup
 
-## Google sign-in
+## Firebase Authentication
 
-The Google button uses Neon Auth social sign-in. Enable Google as a social provider in the Neon project that owns the Auth URL configured in `auth-client.js`.
+The browser now uses Firebase Authentication for Google sign-in, email/password registration and login, password resets, and Google account linking. The Firebase project is `studygroup-b5135`.
 
-In Google Cloud Console, create a Web OAuth client and add this authorised redirect URI:
+In Firebase Console:
 
-`https://ep-wispy-firefly-zavoom2z.neonauth.c-2.eu-west-2.aws.neon.tech/neondb/auth/callback/google`
+1. Open Authentication and choose Get started if Authentication has not been enabled.
+2. Under Sign-in method, enable Google and Email/Password.
+3. Under Settings → Authorized domains, add `studygroupacademy.github.io`.
+4. Set the public-facing project name and support email for the Google provider.
+5. In Authentication → Templates, configure the email verification and password reset templates.
 
-Add the Google client ID and client secret to the Google provider configuration in Neon Auth. Do not put the client secret in frontend files or commit it to GitHub.
-
-Add the production website origin to Neon Auth's trusted/allowed domains. The app currently redirects successful sign-ins to `/dashboard/` on the same website origin.
-
-The browser client sends credentialed requests to the Neon Auth host. The browser must accept the Neon Auth session cookie after the OAuth redirect and send it on requests from the website. If a browser blocks cross-site cookies for the Neon Auth domain, the SDK cannot restore a session from frontend JavaScript alone; use a browser that permits the cookie or move the app and auth traffic behind a supported same-site custom-domain/proxy setup.
+The Firebase web configuration is in `auth-client.js`. It contains public client configuration only. Never put a service-account private key, database password, or other server secret in frontend files.
 
 ## Render environment
 
-The API server requires these environment variables:
+Keep these environment variables in Render:
 
-- `FRONTEND_ORIGIN`
+- `FRONTEND_ORIGIN=https://studygroupacademy.github.io`
 - `FRONTEND_ORIGINS` (optional comma-separated additional website origins)
-- `NEON_AUTH_BASE_URL`
-- `NEON_AUTH_JWKS_URL`
-- `DATABASE_URL`
+- `FIREBASE_PROJECT_ID=studygroup-b5135`
+- `DATABASE_URL` (the existing Neon PostgreSQL connection string)
 - `CLOUDINARY_CLOUD_NAME`
 - `CLOUDINARY_API_KEY`
 - `CLOUDINARY_API_SECRET`
 - `CLOUDINARY_UPLOAD_PRESET`
-- `SCHOOL_ADMIN_EMAIL` (optional)
+- `SCHOOL_ADMIN_EMAIL` (optional; the platform admin is configured in server code)
 
-Keep database credentials, OAuth client secrets, and Cloudinary secrets in Render's environment settings only.
+Remove `NEON_AUTH_BASE_URL` and `NEON_AUTH_JWKS_URL` from Render after deploying this version. Neon PostgreSQL remains the application database. Only Neon Auth is replaced.
 
-## Checks
+The Render API verifies Firebase ID tokens against Google's public signing keys and checks the expected Firebase project issuer and audience. It does not need a Firebase service-account key.
 
-Run `npm test` for the existing unit tests and `npm run build` to syntax-check the server and browser JavaScript modules.
+## Existing account and data continuity
+
+The backend creates a `firebase_auth_identities` mapping table. For a returning user, it can associate the Firebase UID with an existing StudyGroup user record when the existing profile contains the same verified email address. Application records and school records remain in Neon.
+
+Some older StudyGroup profiles may not contain an email address in their stored profile document. Those accounts cannot be safely matched automatically by email. Do not delete Neon Auth or its users until those accounts have been checked and linked. Email/password credentials are not transferred from Neon Auth; affected users will need to create/reset credentials in Firebase or use a verified Google account. Never copy passwords or password hashes manually.
+
+## Deployment
+
+Deploy the whole repository to GitHub Pages and deploy `server.mjs`, `migrations/001_initial.sql`, and the package files to Render. Render must be deployed before the frontend because the frontend calls `/api/identity` to resolve the user's existing StudyGroup database identity.
+
+Run `npm test` for the unit tests and `npm run build` to syntax-check the server and browser JavaScript modules.
 
 ## Public learner profile URLs
 
