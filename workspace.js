@@ -647,7 +647,7 @@ export async function exportData() {
 
 function bindOnce(selector, event, handler) {
   const element = typeof selector === "string" ? document.querySelector(selector) : selector;
-  if (!element) return;
+  if (!element) return; 
   element.addEventListener(event, handler);
 }
 
