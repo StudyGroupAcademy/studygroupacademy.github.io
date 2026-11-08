@@ -1017,3 +1017,24 @@ body { font-size: 16px; line-height: 1.55; }
   .subject-course { min-height: 175px; }
   .member-join { align-items: flex-start; flex-direction: column; }
 }
+
+
+
+.dashboard-layout, .app-container {
+  display: flex;
+  align-items: flex-start;
+  gap: 32px; 
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.left-nav, .sidebar {
+  position: sticky;
+  top: 24px;
+  left: 24px; 
+  height: calc(100vh - 48px);
+  flex-shrink: 0;
+  z-index: 100;
+  overflow-y: auto;
+}
