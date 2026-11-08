@@ -1,6 +1,6 @@
 import { courses } from "./course-catalog.js";
 import { lessonGuides } from "./lesson-guides.js";
-import { authClient, getSessionUser } from "./auth-client.js";
+import { authClient, getCurrentSession, getSessionUser } from "./auth-client.js";
 import { collection, completeActivity, doc, getDoc, getDocs, limit, query } from "./firestore-client.js";
 import { db } from "./core.js";
 import { earnedNameTag } from "./helpers.js";
@@ -125,8 +125,7 @@ function bindFullLesson() {
     label.textContent = activeIndex === slides.length - 1 ? "Ready to finish" : `Step ${activeIndex + 1} of ${slides.length}`;
     previous.disabled = activeIndex === 0;
     next.hidden = activeIndex === slides.length - 1;
-    const activeSelfCheck = slides[activeIndex].querySelector(".lesson-self-check");
-    next.disabled = Boolean(activeSelfCheck && activeSelfCheck.dataset.checked !== "true");
+    next.disabled = false;
     try {
       localStorage.setItem(stepKey, String(activeIndex));
     } catch (error) {
@@ -173,7 +172,6 @@ function bindFullLesson() {
     try { localStorage.setItem(`${stepKey}:checked:${formIndex}`, "true"); } catch (error) {
       console.error("Could not save your self-check progress.", error);
     }
-    next.disabled = false;
   });
   lesson.querySelectorAll("[data-reflection]").forEach((input) => {
     const key = `${stepKey}:reflection:${input.dataset.reflection}`;
@@ -194,7 +192,7 @@ function bindFullLesson() {
     completeButton.disabled = true;
     completeButton.textContent = "Saving your progress…";
     try {
-      const session = await authClient.getSession();
+      const session = await getCurrentSession();
       if (session.error) throw session.error;
       if (getSessionUser(session)) {
         const result = await completeActivity(lesson.dataset.activityId);
@@ -270,7 +268,7 @@ function bindWorksheets() {
       awardButton.disabled = true;
       awardButton.textContent = "Saving your progress…";
       try {
-        const session = await authClient.getSession();
+        const session = await getCurrentSession();
         if (session.error) throw session.error;
         if (getSessionUser(session)) {
           const award = await completeActivity(worksheet.dataset.worksheetId);
@@ -296,7 +294,7 @@ async function renderSidebarAccount() {
   const container = document.querySelector("#course-sidebar-account");
   if (!container) return;
   try {
-    const result = await authClient.getSession();
+    const result = await getCurrentSession();
     if (result.error) throw result.error;
     const user = getSessionUser(result);
     if (!user) return;
@@ -307,8 +305,10 @@ async function renderSidebarAccount() {
       const userId = user.uid || user.id;
       if (!userId) throw new Error("The signed-in account does not include a user ID.");
       const profile = await getDoc(doc(db, "users", userId));
-      const displayName = profile.data()?.nickname || profile.data()?.displayName;
-      if (typeof displayName === "string" && displayName.trim()) name = displayName.trim();
+      const profileData = profile.data() || {};
+      const isPlaceholder = (value) => !value || ["learner", "student", "user"].includes(String(value).trim().toLowerCase());
+      const displayName = [profileData.nickname, profileData.displayName].find((value) => !isPlaceholder(value));
+      if (displayName) name = String(displayName).trim();
       handle = profile.data()?.handle || handle;
       const progress = await getDocs(query(collection(db, "users", userId, "learningProgress"), limit(100)));
       const xp = progress.docs.reduce((total, entry) => {
@@ -327,7 +327,7 @@ async function renderSidebarAccount() {
       try {
         const signedOut = await authClient.signOut();
         if (signedOut?.error) throw signedOut.error;
-        const sessionResult = await authClient.getSession();
+        const sessionResult = await getCurrentSession();
         if (sessionResult?.error) throw sessionResult.error;
         if (getSessionUser(sessionResult)) throw new Error("Your session is still active. Please try logging out again.");
         window.location.assign(new URL("/", window.location.origin).toString());

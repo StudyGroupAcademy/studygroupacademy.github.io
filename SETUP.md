@@ -12,6 +12,8 @@ Add the Google client ID and client secret to the Google provider configuration 
 
 Add the production website origin to Neon Auth's trusted/allowed domains. The app currently redirects successful sign-ins to `/dashboard/` on the same website origin.
 
+The browser client sends credentialed requests to the Neon Auth host. The browser must accept the Neon Auth session cookie after the OAuth redirect and send it on requests from the website. If a browser blocks cross-site cookies for the Neon Auth domain, the SDK cannot restore a session from frontend JavaScript alone; use a browser that permits the cookie or move the app and auth traffic behind a supported same-site custom-domain/proxy setup.
+
 ## Render environment
 
 The API server requires these environment variables:

@@ -1,7 +1,9 @@
 import { createAuthClient } from "https://esm.sh/@neon/neon-js@0.10.2/auth?bundle";
 
+const AUTH_BASE_URL = "https://ep-wispy-firefly-zavoom2z.neonauth.c-2.eu-west-2.aws.neon.tech/neondb/auth";
+
 export const authClient = createAuthClient(
-  "https://ep-wispy-firefly-zavoom2z.neonauth.c-2.eu-west-2.aws.neon.tech/neondb/auth",
+  AUTH_BASE_URL,
   {
     fetchOptions: {
       credentials: "include"
@@ -9,37 +11,85 @@ export const authClient = createAuthClient(
   }
 );
 
+function sessionPayloads(result) {
+  const payloads = [];
+  const queue = [result];
+  const seen = new Set();
+  while (queue.length) {
+    const value = queue.shift();
+    if (!value || typeof value !== "object" || seen.has(value)) continue;
+    seen.add(value);
+    payloads.push(value);
+    if (value.data && typeof value.data === "object") queue.push(value.data);
+  }
+  return payloads;
+}
+
 export function getSessionUser(result) {
-  const data = result?.data || result || {};
-  return data.user || data.session?.user || data.data?.user || data.data?.session?.user || null;
+  for (const payload of sessionPayloads(result)) {
+    if (payload.user && typeof payload.user === "object") return payload.user;
+    if (payload.session?.user && typeof payload.session.user === "object") return payload.session.user;
+  }
+  return null;
 }
 
 export function getSessionRecord(result) {
-  const data = result?.data || result || {};
-  return data.session || data.data?.session || null;
+  for (const payload of sessionPayloads(result)) {
+    if (payload.session && typeof payload.session === "object") return payload.session;
+  }
+  return null;
 }
 
 export function normalizeSessionResult(result) {
-  const data = result?.data || {};
+  const payload = sessionPayloads(result).find((entry) => entry.user || entry.session) || {};
   return {
-    ...data,
+    ...payload,
     user: getSessionUser(result),
     session: getSessionRecord(result)
   };
 }
 
+export async function getCurrentSession({ retries = 0, retryDelay = 250 } = {}) {
+  let result = null;
+  const sessionUrl = new URL("get-session", `${AUTH_BASE_URL.replace(/\/$/, "")}/`);
+  sessionUrl.searchParams.set("disableCookieCache", "true");
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const response = await fetch(sessionUrl, {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json" }
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      const message = payload?.message || payload?.error?.message || payload?.error || `Neon Auth session check failed (${response.status}).`;
+      throw new Error(String(message));
+    }
+    result = { data: payload, error: null };
+    if (getSessionUser(result)) return result;
+    if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, retryDelay));
+  }
+  return result;
+}
+
 export async function getAuthToken() {
+  if (typeof authClient.getJWTToken === "function") {
+    const jwtResult = await authClient.getJWTToken();
+    if (jwtResult?.error) throw jwtResult.error;
+    const jwt = typeof jwtResult === "string" ? jwtResult : jwtResult?.data?.token || jwtResult?.token;
+    if (jwt) return jwt;
+  }
   if (typeof authClient.token === "function") {
     const tokenResult = await authClient.token();
-    if (tokenResult.error) throw tokenResult.error;
-    if (tokenResult.data?.token) return tokenResult.data.token;
+    if (tokenResult?.error) throw tokenResult.error;
+    const jwt = tokenResult?.data?.token || tokenResult?.token;
+    if (jwt) return jwt;
   }
-  const sessionResult = await authClient.getSession();
-  if (sessionResult.error) throw sessionResult.error;
+  const sessionResult = await getCurrentSession();
   const session = getSessionRecord(sessionResult);
-  return session?.token
+  return session?.jwt
     || session?.access_token
     || session?.accessToken
-    || sessionResult.data?.token
+    || sessionResult?.data?.token
     || null;
 }

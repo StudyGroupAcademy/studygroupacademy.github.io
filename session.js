@@ -1,4 +1,4 @@
-import { authClient, getSessionUser } from "./auth-client.js";
+import { getCurrentSession, getSessionUser } from "./auth-client.js";
 import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "./firestore-client.js";
 
 export const NICKNAME_RULE = "Use 2–30 characters: letters, numbers, spaces, hyphens, or apostrophes.";
@@ -24,12 +24,12 @@ export async function ensureUserProfile(user) {
 
   const isPlaceholder = (value) => !value || ["learner", "student", "user"].includes(String(value).trim().toLowerCase());
   const nameCandidates = [
+    user.name,
     user.user_metadata?.full_name,
     user.user_metadata?.name,
     user.metadata?.full_name,
     user.metadata?.name,
-    user.displayName,
-    user.name
+    user.displayName
   ].map((value) => String(value || "").trim()).filter((value) => value && !isPlaceholder(value));
   const emailName = String(user.email?.split("@")[0] || "").trim();
   const authName = nameCandidates[0] || emailName || "Learner";
@@ -74,7 +74,7 @@ export async function ensureUserProfile(user) {
 }
 
 export async function saveProfileChoices(profileData, optIn) {
-  const sessionResult = await authClient.getSession();
+  const sessionResult = await getCurrentSession();
   const authUser = getSessionUser(sessionResult);
   if (!authUser) throw new Error("No active user session found.");
 
@@ -105,7 +105,7 @@ export async function saveProfileChoices(profileData, optIn) {
 }
 
 export async function saveDailyGoal(goal) {
-  const sessionResult = await authClient.getSession();
+  const sessionResult = await getCurrentSession();
   const authUser = getSessionUser(sessionResult);
   if (!authUser) throw new Error("No active user session found.");
 
@@ -118,7 +118,7 @@ export async function saveDailyGoal(goal) {
 }
 
 export async function addWeeklyMinutes(minutes) {
-  const sessionResult = await authClient.getSession();
+  const sessionResult = await getCurrentSession();
   const authUser = getSessionUser(sessionResult);
   if (!authUser) throw new Error("No active user session found.");
 

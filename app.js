@@ -1,4 +1,4 @@
-import { authClient, getAuthToken, getSessionUser, normalizeSessionResult } from "./auth-client.js";
+import { authClient, getAuthToken, getCurrentSession, getSessionUser, normalizeSessionResult } from "./auth-client.js";
 import { $, $$, db, getErrorMessage, setFormError, showBanner, showToast } from "./core.js";
 import { doc, serverTimestamp, setDoc } from "./firestore-client.js";
 import { cleanNickname, consumeOAuthCallback, describeOAuthError, validNickname } from "./helpers.js";
@@ -41,14 +41,16 @@ async function socialSignIn(providerName) {
   const errorContainer = $("#auth-error");
   setFormError(errorContainer, "");
   try {
-    const callbackURL = new URL("dashboard/", document.baseURI);
+    const callbackURL = new URL("/dashboard/", window.location.origin);
     const invite = new URLSearchParams(window.location.search).get("invite");
     if (invite) callbackURL.searchParams.set("invite", invite);
     const result = await authClient.signIn.social({
       provider: providerName,
       callbackURL: callbackURL.toString()
     });
-    if (result.error) throw result.error;
+    if (result?.error) throw result.error;
+    const redirectUrl = result?.data?.url || result?.url;
+    if (redirectUrl && window.location.href !== redirectUrl) window.location.assign(redirectUrl);
   } catch (error) {
     console.error(`StudyGroup ${providerName} sign-in failed.`, error);
     setFormError(errorContainer, error.message || "Sign-in could not be completed. Please try again.");
@@ -94,7 +96,7 @@ authForm.addEventListener("submit", async (event) => {
   const inviteToken = new URLSearchParams(window.location.search).get("invite");
   try {
     let displayName = "";
-    const callbackURL = new URL("dashboard/", document.baseURI);
+    const callbackURL = new URL("/dashboard/", window.location.origin);
     if (inviteToken) callbackURL.searchParams.set("invite", inviteToken);
     if (authMode === "signup") {
       displayName = cleanNickname(email.split("@")[0]).replace(/[^A-Za-z0-9 _.-]/g, "").slice(0, 24) || "Learner";
@@ -103,9 +105,9 @@ authForm.addEventListener("submit", async (event) => {
       accountCreated = true;
     } else {
       const result = await authClient.signIn.email({ email, password });
-      if (result.error) throw result.error;
+      if (result?.error) throw result.error;
     }
-    const session = await refreshAuthState({ loadProfile: authMode !== "signup" });
+    const session = await refreshAuthState({ loadProfile: authMode !== "signup", retries: 5 });
     if (authMode === "signup" && session?.user?.id) {
       await setDoc(doc(db, "users", session.user.id), {
         displayName,
@@ -124,7 +126,9 @@ authForm.addEventListener("submit", async (event) => {
         console.error("The profile setup reminder could not be stored.", storageError);
       }
     }
-    if (!session?.user?.id) throw new Error("Your sign-in finished without an active session.");
+    if (!session?.user?.id) {
+      throw new Error("Neon Auth did not return an active browser session. Check your Neon Auth allowed website origins and make sure your browser allows cookies for the Neon Auth domain, then try again.");
+    }
     window.location.assign(callbackURL.toString());
   } catch (error) {
     console.error(`StudyGroup ${authMode} failed.`, error);
@@ -211,14 +215,14 @@ function renderAuthState(user, profile = null) {
   $$("[data-open-auth]").forEach((button) => {
     button.hidden = Boolean(user);
   });
-  const accountName = profile?.nickname || profile?.displayName || user?.name || user?.email || "";
+  const isPlaceholder = (value) => !value || ["learner", "student", "user"].includes(String(value).trim().toLowerCase());
+  const accountName = [profile?.nickname, profile?.displayName, user?.name, user?.email?.split("@")[0]].find((value) => !isPlaceholder(value)) || "";
   $("#auth-account-name").textContent = accountName;
   $("#auth-dashboard-link").hidden = true;
 }
 
-async function refreshAuthState({ loadProfile = true } = {}) {
-  const result = await authClient.getSession();
-  if (result.error) throw result.error;
+async function refreshAuthState({ loadProfile = true, retries = 0 } = {}) {
+  const result = await getCurrentSession({ retries, retryDelay: 300 });
   const sessionData = normalizeSessionResult(result);
   const user = getSessionUser(result);
   let profile = null;
@@ -234,8 +238,7 @@ $("#auth-sign-out").addEventListener("click", async () => {
   try {
     const result = await authClient.signOut();
     if (result?.error) throw result.error;
-    const sessionResult = await authClient.getSession();
-    if (sessionResult?.error) throw sessionResult.error;
+    const sessionResult = await getCurrentSession();
     if (getSessionUser(sessionResult)) throw new Error("Your session is still active. Please try logging out again.");
     renderAuthState(null);
     showToast("You have been signed out.");
@@ -304,7 +307,7 @@ if (homeworkForm) homeworkForm.addEventListener("submit", async (event) => {
   }
 });
 
-refreshAuthState().then((session) => {
+refreshAuthState({ retries: 2 }).then((session) => {
   if (session?.user) {
     const dashboard = new URL("dashboard/", document.baseURI);
     const invite = new URLSearchParams(window.location.search).get("invite");

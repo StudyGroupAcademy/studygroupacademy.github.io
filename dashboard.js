@@ -1,7 +1,8 @@
-import { authClient, getSessionUser } from "./auth-client.js";
+import { authClient, getCurrentSession, getSessionUser } from "./auth-client.js";
 import { collection, completeActivity, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where } from "./firestore-client.js";
 import { $, $$, db, state, showBanner } from "./core.js";
 import { ensureUserProfile, saveDailyGoal, saveProfileChoices, takeWelcomeFlag } from "./session.js";
+import { consumeOAuthCallback, describeOAuthError } from "./helpers.js";
 import { initResourceFilter, setLessonUser } from "./resources.js";
 
 const DEFAULT_SUBJECTS = ["Maths", "English", "Science", "Computer Science", "History", "Geography", "French", "Spanish"];
@@ -33,9 +34,11 @@ export async function initDashboard() {
   bindSchoolActions();
   
   const welcomePending = takeWelcomeFlag();
+  const oauthCallback = consumeOAuthCallback();
+  if (oauthCallback.error) showBanner(describeOAuthError(oauthCallback.error), true);
 
   try {
-    const sessionResult = await authClient.getSession();
+    const sessionResult = await getCurrentSession({ retries: 2, retryDelay: 250 });
     if (sessionResult.error) throw sessionResult.error;
     const user = getSessionUser(sessionResult);
     currentUser = user ? { ...user, uid: user.id || user.uid } : null;
@@ -59,7 +62,22 @@ export async function initDashboard() {
 async function handleSignedInUser(user) {
   currentUser = { ...user, uid: user.id || user.uid };
   state.user = currentUser;
-  const profile = await ensureUserProfile(currentUser);
+  let profile;
+  try {
+    profile = await ensureUserProfile(currentUser);
+  } catch (error) {
+    const fallbackName = currentUser.name || currentUser.email?.split("@")[0] || "Learner";
+    profile = {
+      uid: currentUser.uid,
+      displayName: fallbackName,
+      nickname: fallbackName,
+      handle: fallbackName.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 15) || "learner",
+      xp: 0,
+      leaderboardOptIn: false
+    };
+    console.error("The account profile could not be synchronised.", error);
+    showBanner("You're signed in, but your profile could not be saved yet. Your account name is shown while we reconnect.", true);
+  }
   state.profile = profile;
   renderSignedIn(profile);
   populateSubjectDropdowns();
@@ -74,7 +92,8 @@ async function handleSignedInUser(user) {
 }
 
 function renderSignedIn(profile) {
-  const name = profile.nickname || profile.displayName || "Learner";
+  const isPlaceholder = (value) => !value || ["learner", "student", "user"].includes(String(value).trim().toLowerCase());
+  const name = [profile.nickname, profile.displayName, currentUser?.name, currentUser?.email?.split("@")[0]].find((value) => !isPlaceholder(value)) || "Learner";
   const initial = name.charAt(0).toUpperCase();
   
   const headerName = $("#header-name");
@@ -154,7 +173,7 @@ function bindNavigation() {
       try {
         const result = await authClient.signOut();
         if (result?.error) throw result.error;
-        const sessionResult = await authClient.getSession();
+        const sessionResult = await getCurrentSession();
         if (sessionResult?.error) throw sessionResult.error;
         if (getSessionUser(sessionResult)) {
           throw new Error("Your session is still active. Please try logging out again.");

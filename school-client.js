@@ -1,13 +1,11 @@
-import { authClient, getSessionRecord } from "./auth-client.js";
+import { getAuthToken } from "./auth-client.js";
 
 const API_URL = "https://studygroupacademy-github-io.onrender.com/api/schools";
 
 export async function schoolRequest(action, data = {}, { anonymous = false } = {}) {
   let token = null;
   if (!anonymous) {
-    const session = await authClient.getSession();
-    if (session.error) throw session.error;
-    token = getSessionRecord(session)?.token || null;
+    token = await getAuthToken();
     if (!token) throw new Error("Please sign in to continue.");
   }
   const response = await fetch(API_URL, {
@@ -26,9 +24,7 @@ export async function schoolRequest(action, data = {}, { anonymous = false } = {
 export async function uploadSchoolFile(file, purpose, schoolId) {
   if (!(file instanceof File) || file.size === 0) throw new Error("Choose a non-empty file to upload.");
   if (file.size > 10 * 1024 * 1024) throw new Error("School files must be 10 MB or smaller.");
-  const session = await authClient.getSession();
-  if (session.error) throw session.error;
-  const token = getSessionRecord(session)?.token;
+  const token = await getAuthToken();
   if (!token) throw new Error("Please sign in again before uploading a file.");
   const response = await fetch("https://studygroupacademy-github-io.onrender.com/api/cloudinary/signature", {
     method: "POST",
