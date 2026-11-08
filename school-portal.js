@@ -22,6 +22,8 @@ let currentUser = null;
 let currentProfile = null;
 let context = null;
 let adminData = null;
+let globalNotifications = [];
+let notificationTimer = null;
 let bound = false;
 
 function escapeHtml(value) {
@@ -82,8 +84,33 @@ function renderNotifications(notifications = [], adminInbox = false) {
   list.innerHTML = notifications.map((notification) => `
     <article class="school-notification ${notification.read_at ? "" : "is-unread"}">
       <div><strong>${escapeHtml(notification.title)}</strong><p>${escapeHtml(notification.body)}</p><small>${escapeHtml(formatDate(notification.created_at))}</small></div>
-      ${!adminInbox && !notification.read_at ? `<button class="button button-light" type="button" data-notification-read="${escapeHtml(notification.id)}">Mark read</button>` : ""}
+      ${!notification.read_at ? `<button class="button button-light" type="button" data-notification-read="${escapeHtml(notification.id)}">Mark read</button>` : ""}
     </article>`).join("");
+}
+
+function renderGlobalNotifications(notifications = []) {
+  globalNotifications = notifications;
+  const list = $("#notification-menu-list");
+  const count = $("#notification-count");
+  if (!list || !count) return;
+  const unread = notifications.filter((item) => !item.read_at).length;
+  count.textContent = unread > 99 ? "99+" : String(unread);
+  count.hidden = unread === 0;
+  list.innerHTML = notifications.length ? notifications.map((item) => `
+    <article class="notification-menu-item ${item.read_at ? "" : "is-unread"}">
+      <div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.body)}</p><small>${escapeHtml(formatDate(item.created_at, true))}</small></div>
+      ${!item.read_at ? `<button type="button" data-notification-read="${escapeHtml(item.id)}">Mark read</button>` : ""}
+    </article>`).join("") : '<p class="notification-empty">You are all caught up.</p>';
+}
+
+async function refreshGlobalNotifications() {
+  if (!currentUser) return;
+  try {
+    const result = await schoolRequest("notifications-list");
+    renderGlobalNotifications(result.notifications || []);
+  } catch (error) {
+    console.warn("Could not refresh notifications.", error);
+  }
 }
 
 function formatDate(value, includeTime = false) {
@@ -222,6 +249,8 @@ async function loadSchoolContext() {
     }
 
     context = await schoolRequest("context");
+    const notificationResult = await schoolRequest("notifications-list");
+    renderGlobalNotifications(notificationResult.notifications || []);
     setSchoolCalendarEvents(context.assignments || []);
     adminData = currentUser.email?.toLowerCase() === adminEmail
       ? await schoolRequest("admin-list")
@@ -399,7 +428,12 @@ async function handleClick(event) {
     }
     if (read) {
       await schoolRequest("mark-notification-read", { notificationId: read.dataset.notificationRead });
-      await loadSchoolContext();
+      await refreshGlobalNotifications();
+      if (context?.member) {
+        const refreshed = await schoolRequest("context");
+        context.notifications = refreshed.notifications || [];
+        renderNotifications(context.notifications, false);
+      }
     }
   } catch (error) {
     console.error("A school workspace action failed.", error);
@@ -418,7 +452,17 @@ export function initSchoolPortal() {
   $("#school-refresh").addEventListener("click", loadSchoolContext);
   $("#school-portal").addEventListener("submit", handleSubmit);
   $("#school-admin-section").addEventListener("click", handleClick);
+  $("#school-admin-notifications").addEventListener("click", handleClick);
   $("#school-portal").addEventListener("click", handleClick);
+  $("#global-notification-menu").addEventListener("click", handleClick);
+  $("#notification-toggle").addEventListener("click", () => {
+    const panel = $("#notification-popover");
+    const opening = panel.hidden;
+    panel.hidden = !opening;
+    $("#notification-toggle").setAttribute("aria-expanded", String(opening));
+    if (opening) refreshGlobalNotifications();
+  });
+  $("#notifications-refresh").addEventListener("click", refreshGlobalNotifications);
   renderPermissions();
 }
 
@@ -426,4 +470,6 @@ export async function startSchoolPortal(user, profile) {
   currentUser = user;
   currentProfile = profile;
   await loadSchoolContext();
+  if (notificationTimer) clearInterval(notificationTimer);
+  notificationTimer = setInterval(refreshGlobalNotifications, 20000);
 }

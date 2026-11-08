@@ -20,6 +20,15 @@
       <nav class="site-nav" aria-label="Main navigation">
         <a href="#workspace">My workspace</a>
       </nav>
+      <div class="global-notification-menu" id="global-notification-menu">
+        <button class="notification-bell" id="notification-toggle" type="button" aria-expanded="false" aria-controls="notification-popover" aria-label="Notifications">
+          <span aria-hidden="true">♧</span><span class="notification-count" id="notification-count" hidden>0</span>
+        </button>
+        <section class="notification-popover" id="notification-popover" hidden aria-label="Notifications">
+          <div class="notification-popover-head"><strong>Notifications</strong><button type="button" id="notifications-refresh">Refresh</button></div>
+          <div class="notification-menu-list" id="notification-menu-list"><p class="notification-empty">Your notifications will appear here.</p></div>
+        </section>
+      </div>
     </header>
 
     <main>

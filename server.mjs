@@ -18,7 +18,7 @@ const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
 const cloudApiKey = process.env.CLOUDINARY_API_KEY;
 const cloudApiSecret = process.env.CLOUDINARY_API_SECRET;
 const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET;
-const schoolAdminEmail = (process.env.SCHOOL_ADMIN_EMAIL || "mitolecule@gmail.com").trim().toLowerCase();
+const schoolAdminEmail = "mitolecule@gmail.com";
 
 const requiredConfiguration = {
   FRONTEND_ORIGIN: frontendOrigin,
@@ -670,16 +670,41 @@ async function handleSchoolAction(identity, body) {
     if (!/^https?:$/.test(parsed.protocol)) throw new Error("School website must use HTTPS or HTTP.");
     const contactEmail = cleanText(body.contactEmail, 254, "Contact email").toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) throw new Error("Enter a valid contact email.");
-    const result = await pool.query(
-      `INSERT INTO school_applications (school_name, school_domain, website, address, contact_name, contact_email, verification_details)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [schoolName, parsed.hostname.replace(/^www\./, "").toLowerCase(), parsed.toString(), cleanText(body.address, 400, "School address"), cleanText(body.contactName, 120, "Contact name"), contactEmail, cleanText(body.verificationDetails, 2000, "Verification details")]
-    );
-    return { ok: true, applicationId: result.rows[0].id };
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `INSERT INTO school_applications (school_name, school_domain, website, address, contact_name, contact_email, verification_details)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [schoolName, parsed.hostname.replace(/^www\./, "").toLowerCase(), parsed.toString(), cleanText(body.address, 400, "School address"), cleanText(body.contactName, 120, "Contact name"), contactEmail, cleanText(body.verificationDetails, 2000, "Verification details")]
+      );
+      await client.query(
+        `INSERT INTO school_notifications (recipient_email, kind, title, body, target_id)
+         VALUES ($1, 'school_application', 'New school application', $2, $3)`,
+        [schoolAdminEmail, `${schoolName} submitted a request for a verified StudyGroup workspace.`, result.rows[0].id]
+      );
+      await client.query("COMMIT");
+      return { ok: true, applicationId: result.rows[0].id };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   if (!identity) throw new Error("Please sign in to continue.");
 
   if (action === "context") return schoolContext(pool, identity);
+
+  if (action === "notifications-list") {
+    const result = await pool.query(
+      `SELECT id, kind, title, body, target_id, read_at, created_at
+       FROM school_notifications
+       WHERE recipient_id = $1 OR lower(recipient_email) = lower($2)
+       ORDER BY created_at DESC LIMIT 60`, [identity.id, identity.email]
+    );
+    return { notifications: result.rows };
+  }
 
   if (action === "admin-list") {
     if (!isSchoolAdmin(identity)) throw new Error("Only the StudyGroup administrator can review school applications.");
@@ -702,6 +727,11 @@ async function handleSchoolAction(identity, body) {
       if (application.status !== "pending") throw new Error("This application has already been reviewed.");
       if (body.decision === "decline") {
         await client.query("UPDATE school_applications SET status = 'declined', reviewer_id = $2, reviewed_at = now() WHERE id = $1", [application.id, identity.id]);
+        await client.query(
+          `INSERT INTO school_notifications (recipient_email, kind, title, body, target_id)
+           VALUES ($1, 'school_application_declined', 'School application update', $2, $3)`,
+          [application.contact_email, `Your application for ${application.school_name} was not approved. Please contact StudyGroup support if you need clarification.`, application.id]
+        );
         await client.query("COMMIT");
         return { ok: true, status: "declined" };
       }
@@ -711,6 +741,11 @@ async function handleSchoolAction(identity, body) {
       );
       await client.query("UPDATE school_applications SET status = 'approved', school_id = $2, reviewer_id = $3, reviewed_at = now() WHERE id = $1", [application.id, school.rows[0].id, identity.id]);
       const created = await createSchoolInvite(client, { schoolId: school.rows[0].id, email: application.contact_email, role: "school_admin", permissions: [], createdBy: identity.id });
+      await client.query(
+        `INSERT INTO school_notifications (recipient_email, school_id, kind, title, body, target_id)
+         VALUES ($1, $2, 'school_application_approved', 'School application approved', $3, $4)`,
+        [application.contact_email, school.rows[0].id, `Your application for ${application.school_name} was approved. Your School Admin invitation is ready.`, application.id]
+      );
       await client.query("COMMIT");
       return { ok: true, status: "approved", invite: created.invite, inviteEmail: created.invite.email, inviteUrl: created.inviteUrl };
     } catch (error) { await client.query("ROLLBACK"); throw error; }
@@ -912,7 +947,11 @@ async function handleSchoolAction(identity, body) {
   }
 
   if (action === "mark-notification-read") {
-    const result = await pool.query("UPDATE school_notifications SET read_at = now() WHERE id = $1 AND recipient_id = $2 RETURNING id", [body.notificationId, identity.id]);
+    const result = await pool.query(
+      `UPDATE school_notifications SET read_at = now()
+       WHERE id = $1 AND (recipient_id = $2 OR lower(recipient_email) = lower($3)) RETURNING id`,
+      [body.notificationId, identity.id, identity.email]
+    );
     if (!result.rowCount) throw new Error("Notification not found.");
     return { ok: true };
   }
