@@ -246,7 +246,7 @@ $("#link-google").addEventListener("click", async (event) => {
   setFormError($("#profile-error"), "");
   try {
     const callbackBase = `${window.location.origin}${window.location.pathname}`;
-    const result = await authClient.linkSocial({
+    const result = await authClient.signIn.social({
       provider: "google",
       callbackURL: `${callbackBase}?oauth=google-linked`,
       errorCallbackURL: `${callbackBase}?error=linking-failed`
@@ -255,7 +255,7 @@ $("#link-google").addEventListener("click", async (event) => {
     if (!result.data?.url) throw new Error("Neon Auth did not return a Google authorization URL.");
     window.location.assign(result.data.url);
   } catch (error) {
-    console.error("Could not link Google to this StudyGroup account.", error);
+    console.error("Could not sign in with Google.", error);
     setFormError($("#profile-error"), error.message || getErrorMessage(error));
     button.disabled = false;
   }
