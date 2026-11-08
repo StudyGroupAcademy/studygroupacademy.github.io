@@ -1010,3 +1010,143 @@ function renderCard() {
     renderCard();
   });
 }
+
+
+$("#flip-card")?.addEventListener("click", () => {
+    cardShowingAnswer = !cardShowingAnswer;
+    renderCard();
+  });
+
+  $("#next-card")?.addEventListener("click", () => {
+    cardIndex++;
+    cardShowingAnswer = false;
+    renderCard();
+  });
+}
+
+async function loadSessions() {
+  if (!currentUser) return;
+  const container = $("#session-list");
+  if (!container) return;
+  try {
+    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "sessions")));
+    const sessions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    container.innerHTML = sessions.length ? sessions.map(s => `
+      <div class="item-row">
+        <span><strong>${escapeHtml(s.subject)}</strong> (${s.minutes} mins)</span>
+        <span class="item-meta">${new Date(s.createdAt).toLocaleDateString()}</span>
+      </div>
+    `).join("") : `<p class="muted-line">No study sessions logged yet.</p>`;
+  } catch (err) {
+    console.error("Failed to load sessions:", err);
+  }
+}
+
+async function loadNotes() {
+  if (!currentUser) return;
+  const container = $("#note-list");
+  if (!container) return;
+  try {
+    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "notes")));
+    const notes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    container.innerHTML = notes.length ? notes.map(n => `
+      <div class="item-row" data-note-id="${n.id}">
+        <div><strong>${escapeHtml(n.title)}</strong><span class="item-meta">${escapeHtml(n.subject || "General")}</span></div>
+      </div>
+    `).join("") : `<p class="muted-line">No notes found.</p>`;
+
+    container.querySelectorAll("[data-note-id]").forEach(row => {
+      row.addEventListener("click", () => {
+        const id = row.dataset.noteId;
+        const note = notes.find(n => n.id === id);
+        if (note) {
+          activeNoteId = note.id;
+          const form = $("#note-form");
+          if (form) {
+            form.elements["title"].value = note.title || "";
+            form.elements["subject"].value = note.subject || "";
+            form.elements["body"].value = note.body || "";
+          }
+          const status = $("#note-status");
+          if (status) status.textContent = "Editing note";
+          const delBtn = $("#note-delete");
+          if (delBtn) delBtn.hidden = false;
+        }
+      });
+    });
+  } catch (err) {
+    console.error("Failed to load notes:", err);
+  }
+}
+
+async function loadGroups() {
+  if (!currentUser) return;
+  const container = $("#group-list");
+  if (!container) return;
+  try {
+    const snap = await getDocs(query(collection(db, "studyGroups"), where("members", "array-contains", currentUser.uid)));
+    const groups = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    container.innerHTML = groups.length ? groups.map(g => `
+      <div class="item-row">
+        <div><strong>${escapeHtml(g.name)}</strong><span class="item-meta">${escapeHtml(g.subject)} · Code: ${g.id}</span></div>
+        <button class="button button-light" type="button" data-group-open="${g.id}" data-group-name="${escapeHtml(g.name)}">Open Chat</button>
+      </div>
+    `).join("") : `<p class="muted-line">You haven't joined any study groups yet.</p>`;
+
+    container.querySelectorAll("[data-group-open]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        openGroupChat(btn.dataset.groupOpen, btn.dataset.groupName);
+      });
+    });
+  } catch (err) {
+    console.error("Failed to load groups:", err);
+  }
+}
+
+function openGroupChat(code, name) {
+  activeGroupCode = code;
+  const chatRoom = $("#chat-room");
+  const chatEmpty = $("#chat-empty");
+  const titleElem = $("#chat-group-title");
+  if (chatRoom) chatRoom.hidden = false;
+  if (chatEmpty) chatEmpty.hidden = true;
+  if (titleElem) titleElem.textContent = name;
+}
+
+async function loadLeaderboard() {
+  const container = $("#leaderboard-list");
+  if (!container) return;
+  try {
+    const snap = await getDocs(query(collection(db, "users"), where("leaderboardOptIn", "==", true), limit(10)));
+    const users = snap.docs.map(d => d.data());
+    container.innerHTML = users.length ? users.map((u, index) => `
+      <div class="item-row">
+        <span><strong>#${index + 1} ${escapeHtml(u.nickname || u.displayName || "Learner")}</strong></span>
+        <span>${u.xp || 0} XP</span>
+      </div>
+    `).join("") : `<p class="muted-line">No participants on the leaderboard yet.</p>`;
+  } catch (err) {
+    console.error("Failed to load leaderboard:", err);
+  }
+}
+
+async function loadSchoolData() {
+  const container = $("#school-feed");
+  if (!container) return;
+  container.innerHTML = `<p class="muted-line">School announcements are up to date.</p>`;
+}
+
+function downloadUserData() {
+  alert("Data export feature coming soon!");
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+initDashboard();
