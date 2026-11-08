@@ -1120,3 +1120,68 @@ body { font-size: 16px; line-height: 1.55; }
 .chat-form .button { min-width: 78px; min-height: 43px; border-radius: 10px; }
 @media (max-width: 900px) { .group-layout { grid-template-columns: 1fr; } .group-side { grid-template-columns: repeat(2, minmax(0, 1fr)); } .group-side > div { grid-column: 1 / -1; } .chat, .chat-empty, .chat-room { min-height: 520px; } }
 @media (max-width: 600px) { .group-side { grid-template-columns: 1fr; } .group-side > div { grid-column: auto; } .chat, .chat-empty, .chat-room { min-height: 500px; } .chat-head { align-items: flex-start; } .chat-actions { width: 100%; } .chat-actions .button { flex: 1; } .chat-messages { min-height: 330px; padding: 15px 11px; } .chat-message { max-width: 90%; } .chat-form { padding: 10px; } .chat-form .button { min-width: 64px; } }
+
+.chat-message-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 2px; opacity: .72; }
+.chat-message-actions button { border: 0; padding: 2px 0; background: transparent; color: #88714b; font: 600 10px "DM Sans", sans-serif; cursor: pointer; }
+.chat-message-actions button:hover { color: #392c19; text-decoration: underline; }
+.chat-message.mine .chat-message-actions { opacity: 1; }
+#account-handle { color: #9a7540; text-decoration: none; }
+#account-handle:hover { text-decoration: underline; }
+.leader-student strong a { color: inherit; text-decoration: none; }
+.leader-student strong a:hover { text-decoration: underline; text-decoration-color: #c79a54; }
+
+.public-profile-mode { min-height: 100%; background: #f8f7f3; }
+.public-profile-mode body { min-height: 100vh; margin: 0; background: #f8f7f3; color: #302f29; font-family: "DM Sans", sans-serif; }
+.public-profile-mode body > .site-header, .public-profile-mode body > main:not(.public-profile-shell), .public-profile-mode body > .site-footer, .public-profile-mode body > dialog, .public-profile-mode body > .toast, .public-profile-mode body > .firebase-banner { display: none !important; }
+.public-profile-nav { display: flex; height: 76px; align-items: center; justify-content: space-between; padding: 0 max(24px, calc((100vw - 1000px) / 2)); border-bottom: 1px solid #eae7df; background: rgba(255,255,255,.8); }
+.public-profile-brand { color: #302f29; font: 800 21px Manrope, sans-serif; letter-spacing: -1px; text-decoration: none; }
+.public-profile-brand span { color: #d59b45; }
+.public-profile-home { color: #766d5d; font-size: 12px; font-weight: 600; text-decoration: none; }
+.public-profile-shell { width: min(820px, calc(100% - 36px)); min-height: calc(100vh - 140px); margin: 48px auto 60px; }
+.public-profile-loading { display: grid; min-height: 320px; place-content: center; justify-items: center; color: #898477; font-size: 13px; }
+.public-profile-spinner { width: 28px; height: 28px; border: 2px solid #e8e2d6; border-top-color: #bd8d4b; border-radius: 50%; animation: profile-spin .8s linear infinite; }
+@keyframes profile-spin { to { transform: rotate(360deg); } }
+.public-profile-content { overflow: hidden; border: 1px solid #e9e5dc; border-radius: 18px; background: #fff; box-shadow: 0 16px 48px rgba(42,36,24,.045); }
+.public-profile-hero { display: flex; align-items: center; gap: 20px; padding: 36px 38px; background: linear-gradient(115deg, #fbf7ed, #fff 70%); border-bottom: 1px solid #efede7; }
+.public-profile-avatar { display: grid; width: 76px; height: 76px; flex: 0 0 76px; place-items: center; border: 1px solid #e8d7b9; border-radius: 22px; background: #f5ead5; color: #88683b; font: 800 32px Manrope, sans-serif; }
+.public-profile-identity { min-width: 0; flex: 1; }
+.public-profile-eyebrow, .public-profile-label { color: #a18b68; font-size: 9px; font-weight: 800; letter-spacing: 1.5px; }
+.public-profile-identity h1 { margin: 5px 0 2px; color: #302f29; font: 800 clamp(24px, 4vw, 34px) Manrope, sans-serif; letter-spacing: -1.3px; overflow-wrap: anywhere; }
+.public-profile-identity p { margin: 0; color: #8c877d; font-size: 13px; }
+.public-profile-xp { display: grid; justify-items: end; gap: 2px; }
+.public-profile-xp strong { color: #9b7541; font: 800 25px Manrope, sans-serif; }
+.public-profile-xp span { color: #9a958b; font-size: 10px; }
+.public-profile-bio { padding: 24px 38px 22px; border-bottom: 1px solid #f0eee8; }
+.public-profile-bio p { margin: 9px 0 6px; color: #5e5b53; font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.public-profile-bio small { color: #a18b68; font-size: 11px; }
+.public-profile-stats { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid #f0eee8; }
+.public-profile-stats article { display: grid; gap: 5px; justify-items: center; padding: 22px 10px; border-right: 1px solid #f0eee8; }
+.public-profile-stats article:last-child { border: 0; }
+.public-profile-stats strong { color: #343229; font: 800 23px Manrope, sans-serif; }
+.public-profile-stats span { color: #928c80; font-size: 10px; }
+.public-profile-section { padding: 28px 38px; border-bottom: 1px solid #f0eee8; }
+.public-profile-section-head { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
+.public-profile-section-head h2 { margin: 5px 0 0; color: #343229; font: 700 19px Manrope, sans-serif; letter-spacing: -.5px; }
+.public-profile-section-head > span { color: #a19a8e; font-size: 10px; }
+.public-profile-achievements { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.public-profile-achievement { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 12px; border: 1px solid #efede7; border-radius: 10px; background: #fdfcf9; }
+.public-profile-achievement.is-earned { border-color: #e9dcc5; background: #fffbf3; }
+.achievement-mark { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border-radius: 9px; background: #f2eadc; color: #a47b3d; font-size: 17px; }
+.is-locked .achievement-mark { background: #f1f0ed; color: #aaa69c; }
+.public-profile-achievement div { display: grid; min-width: 0; gap: 3px; flex: 1; }
+.public-profile-achievement strong { color: #4a473f; font-size: 11px; }
+.public-profile-achievement small { color: #9a958b; font-size: 9px; }
+.achievement-status { color: #a17d48; font-size: 9px; }
+.is-locked .achievement-status { color: #aaa69c; }
+.public-profile-subjects { display: flex; flex-wrap: wrap; gap: 8px; }
+.public-profile-subjects span { display: grid; gap: 3px; min-width: 115px; padding: 10px 12px; border: 1px solid #efede7; border-radius: 9px; background: #fdfcf9; }
+.public-profile-subjects strong { color: #4a473f; font-size: 11px; }
+.public-profile-subjects small, .public-profile-muted { color: #9a958b; font-size: 10px; }
+.public-profile-bottom { display: flex; justify-content: space-between; gap: 12px; padding: 18px 38px; color: #aaa397; font-size: 10px; }
+.public-profile-bottom a, .public-profile-error a { color: #97713e; font-weight: 700; text-decoration: none; }
+.public-profile-error { display: grid; min-height: 330px; place-content: center; justify-items: center; padding: 30px; text-align: center; }
+.public-profile-error > span { color: #c19a61; font: 800 12px Manrope, sans-serif; letter-spacing: 2px; }
+.public-profile-error h1 { margin: 8px 0; font: 800 26px Manrope, sans-serif; }
+.public-profile-error p { color: #8c877d; font-size: 13px; }
+.public-profile-footer { padding: 0 20px 24px; color: #aaa397; font-size: 10px; text-align: center; }
+@media (max-width: 600px) { .public-profile-nav { height: 64px; padding: 0 18px; }.public-profile-shell { width: calc(100% - 22px); margin: 22px auto 35px; }.public-profile-hero { flex-wrap: wrap; gap: 13px; padding: 23px 19px; }.public-profile-avatar { width: 58px; height: 58px; flex-basis: 58px; border-radius: 17px; font-size: 25px; }.public-profile-xp { margin-left: auto; }.public-profile-bio, .public-profile-section { padding: 21px 19px; }.public-profile-stats article { padding: 17px 5px; }.public-profile-stats strong { font-size: 19px; }.public-profile-stats span { font-size: 9px; text-align: center; }.public-profile-achievements { grid-template-columns: 1fr; }.public-profile-bottom { padding: 16px 19px; } }

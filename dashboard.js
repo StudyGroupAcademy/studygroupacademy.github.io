@@ -95,7 +95,7 @@ async function handleSignedInUser(user) {
 
 function renderSignedIn(profile) {
   const isPlaceholder = (value) => !value || ["learner", "student", "user"].includes(String(value).trim().toLowerCase());
-  const name = [currentUser?.name, currentUser?.user_metadata?.full_name, currentUser?.user_metadata?.name, profile.displayName, profile.nickname, currentUser?.email?.split("@")[0]].find((value) => !isPlaceholder(value)) || "StudyGroup student";
+  const name = [profile.displayName, profile.nickname, currentUser?.name, currentUser?.user_metadata?.full_name, currentUser?.user_metadata?.name].find((value) => !isPlaceholder(value)) || "StudyGroup student";
   const initial = name.charAt(0).toUpperCase();
   
   const headerName = $("#header-name");
@@ -107,7 +107,11 @@ function renderSignedIn(profile) {
   const emailElem = $("#account-email");
   if (emailElem) emailElem.textContent = currentUser?.email || "";
   const handleElem = $("#account-handle");
-  if (handleElem) handleElem.textContent = `@${profile.handle || "user"}`;
+  if (handleElem) {
+    handleElem.textContent = `@${profile.handle || "user"}`;
+    handleElem.href = `${window.location.origin}/?${encodeURIComponent(profile.handle || "user")}`;
+    handleElem.title = "View your public profile";
+  }
   const accountBadge = $("#account-badge");
   if (accountBadge) accountBadge.textContent = "Personal account";
   
@@ -464,7 +468,8 @@ function bindProfileDialog() {
       dialog.close();
       const snapshot = await getDoc(doc(db, "users", currentUser.uid));
       if (snapshot.exists()) {
-        renderSignedIn(snapshot.data());
+        state.profile = snapshot.data();
+        renderSignedIn(state.profile);
       }
     } catch (err) {
       if (errBox) {
@@ -837,7 +842,8 @@ function renderGroupMessages(snapshot) {
     const sender = message.name || "StudyGroup member";
     const stamp = message.createdAt?.toDate ? message.createdAt.toDate() : message.createdAt ? new Date(message.createdAt) : null;
     const time = stamp && !Number.isNaN(stamp.getTime()) ? stamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-    return `<article class="chat-message${mine ? " mine" : ""}"><div class="chat-message-meta"><strong>${escapeHtml(sender)}</strong><time>${escapeHtml(time)}</time></div><p>${escapeHtml(message.text || "")}</p></article>`;
+    const senderMarkup = message.handle ? `<a href="/?${encodeURIComponent(message.handle)}" target="_blank" rel="noopener">${escapeHtml(sender)}</a>` : escapeHtml(sender);
+    return `<article class="chat-message${mine ? " mine" : ""}"><div class="chat-message-meta"><strong>${senderMarkup}</strong><time>${escapeHtml(time)}${message.editedAt ? " · edited" : ""}</time></div><p>${escapeHtml(message.text || "")}</p>${mine ? `<div class="chat-message-actions"><button type="button" data-message-edit="${escapeHtml(message.id)}">Edit</button><button type="button" data-message-delete="${escapeHtml(message.id)}">Delete</button></div>` : ""}</article>`;
   }).join("") : `<div class="chat-empty-state"><span class="chat-empty-icon">✦</span><strong>Start the conversation</strong><p>Send the first message to your study group.</p></div>`;
   if (nearBottom || box.dataset.firstRender === "true") box.scrollTop = box.scrollHeight;
   box.dataset.firstRender = "false";
@@ -934,6 +940,32 @@ function bindGroupActions() {
     }
   });
 
+  const messageBox = $("#chat-messages");
+  if (messageBox) messageBox.addEventListener("click", async (event) => {
+    const editButton = event.target.closest("[data-message-edit]");
+    const deleteButton = event.target.closest("[data-message-delete]");
+    const messageId = editButton?.dataset.messageEdit || deleteButton?.dataset.messageDelete;
+    if (!messageId || !activeGroupCode) return;
+    const messageRef = doc(db, "groups", activeGroupCode, "messages", messageId);
+    try {
+      if (editButton) {
+        const snapshot = await getDoc(messageRef);
+        if (!snapshot.exists() || snapshot.data().uid !== currentUser.uid) throw new Error("You can only edit your own messages.");
+        const nextText = window.prompt("Edit your message", snapshot.data().text || "");
+        if (nextText === null) return;
+        const cleaned = nextText.trim().slice(0, 500);
+        if (!cleaned) throw new Error("A message cannot be empty.");
+        await updateDoc(messageRef, { text: cleaned, editedAt: new Date().toISOString() });
+      } else if (window.confirm("Delete this message?")) {
+        const snapshot = await getDoc(messageRef);
+        if (!snapshot.exists() || snapshot.data().uid !== currentUser.uid) throw new Error("You can only delete your own messages.");
+        await deleteDoc(messageRef);
+      }
+    } catch (error) {
+      showBanner(error.message || "That message could not be changed.", true);
+    }
+  });
+
   const chatForm = $("#chat-form");
   if (chatForm) chatForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -946,9 +978,9 @@ function bindGroupActions() {
     try {
       const profile = await getDoc(doc(db, "users", currentUser.uid));
       const profileData = profile.exists() ? profile.data() : {};
-      const name = String(profileData.nickname || profileData.displayName || currentUser.name || currentUser.email?.split("@")[0] || "Learner").slice(0, 24);
+      const name = String(profileData.displayName || profileData.nickname || currentUser.name || "Learner").slice(0, 24);
       await addDoc(collection(db, "groups", activeGroupCode, "messages"), {
-        uid: currentUser.uid, name, text: text.slice(0, 500), createdAt: serverTimestamp()
+        uid: currentUser.uid, name, handle: profileData.handle || "", text: text.slice(0, 500), createdAt: serverTimestamp()
       });
       input.value = "";
       input.focus();
@@ -1421,7 +1453,7 @@ async function loadLeaderboard() {
         const name = escapeHtml(user.displayName || user.nickname || 'Learner');
         const current = currentUser?.uid === user.id;
         const rankClass = rank <= 3 ? ` rank-${rank}` : '';
-        return `<article class="leaderboard-row${current ? ' is-you' : ''}"><span class="leader-rank${rankClass}">${String(rank).padStart(2, '0')}</span><span class="leader-avatar leader-avatar-${(index % 4) + 1}">${name.slice(0, 1).toUpperCase()}</span><span class="leader-student"><strong>${name}</strong><small>${current ? 'That’s you · keep it up!' : 'Making progress, one lesson at a time'}</small></span><span class="leader-points">${Number(user[field]) || 0}<small>XP</small></span></article>`;
+        return `<article class="leaderboard-row${current ? ' is-you' : ''}"><span class="leader-rank${rankClass}">${String(rank).padStart(2, '0')}</span><span class="leader-avatar leader-avatar-${(index % 4) + 1}">${name.slice(0, 1).toUpperCase()}</span><span class="leader-student"><strong><a href="/?${encodeURIComponent(user.handle || "")}" target="_blank" rel="noopener">${name}</a></strong><small>${current ? 'That’s you · keep it up!' : 'Making progress, one lesson at a time'}</small></span><span class="leader-points">${Number(user[field]) || 0}<small>XP</small></span></article>`;
       }).join('');
     }
     const myRank = $('#my-rank');

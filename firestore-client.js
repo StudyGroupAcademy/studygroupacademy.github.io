@@ -2,6 +2,11 @@ import { getAuthToken } from "./auth-client.js";
 
 const API_URL = "https://studygroupacademy-github-io.onrender.com/api/data";
 const SERVER_TIMESTAMP = "__studygroupServerTimestamp";
+const activeWatchers = new Set();
+
+function refreshActiveWatchers() {
+  for (const refresh of activeWatchers) refresh();
+}
 
 function reference(path, kind) {
   if (!Array.isArray(path) || path.length === 0 || path.some((part) => typeof part !== "string" || !part)) {
@@ -130,7 +135,7 @@ export function query(collectionRef, ...constraints) {
 }
 
 export async function getDoc(ref) {
-  const result = await request({ op: "get", path: ref.path }, ref.path[0] === "publicLeaderboard");
+  const result = await request({ op: "get", path: ref.path }, ["publicLeaderboard", "publicProfiles"].includes(ref.path[0]));
   return snapshot(ref.path, result.data);
 }
 
@@ -139,17 +144,19 @@ export async function getDocs(ref) {
     op: "list",
     path: ref.path,
     constraints: (ref.constraints || []).map((constraint) => ({ ...constraint, value: encodeValue(constraint.value) }))
-  }, ref.path[0] === "publicLeaderboard");
+  }, ["publicLeaderboard", "publicProfiles"].includes(ref.path[0]));
   const docs = result.docs.map((entry) => snapshot(entry.path, entry.data));
   return { docs, empty: docs.length === 0, size: docs.length };
 }
 
 export async function setDoc(ref, data, options = {}) {
   await request({ op: "set", path: ref.path, data: encodeValue(data), merge: options.merge === true });
+  refreshActiveWatchers();
 }
 
 export async function updateDoc(ref, data) {
   await request({ op: "update", path: ref.path, data: encodeValue(data) });
+  refreshActiveWatchers();
 }
 
 export async function completeActivity(activityId) {
@@ -162,6 +169,7 @@ export async function syncLeaderboardXp() {
 
 export async function deleteDoc(ref) {
   await request({ op: "delete", path: ref.path });
+  refreshActiveWatchers();
 }
 
 export async function addDoc(ref, data) {
@@ -187,10 +195,12 @@ export function onSnapshot(ref, next, error = () => {}) {
       running = false;
     }
   };
+  activeWatchers.add(poll);
   poll();
-  const timer = window.setInterval(poll, 5000);
+  const timer = window.setInterval(poll, 3000);
   return () => {
     active = false;
+    activeWatchers.delete(poll);
     window.clearInterval(timer);
   };
 }

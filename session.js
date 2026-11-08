@@ -38,9 +38,10 @@ export async function ensureUserProfile(user) {
     if (Object.keys(updates).length) {
       updates.updatedAt = new Date().toISOString();
       await setDoc(userDocRef, { ...existing, ...updates }, { merge: true });
-      return { ...existing, ...updates };
     }
-    return { ...existing, uid };
+    const profile = { ...existing, ...updates, uid };
+    if (profile.handle) await setDoc(doc(null, "publicProfiles", String(profile.handle).toLowerCase()), publicProfileData(profile), { merge: true });
+    return profile;
   }
   const profile = {
     uid,
@@ -58,8 +59,24 @@ export async function ensureUserProfile(user) {
     createdAt: new Date().toISOString()
   };
   await setDoc(userDocRef, profile);
+  await setDoc(doc(null, "publicProfiles", profile.handle), publicProfileData(profile));
   try { sessionStorage.setItem("studygroup_welcome", "true"); } catch {}
   return profile;
+}
+
+function publicProfileData(profile) {
+  return {
+    uid: profile.uid,
+    handle: String(profile.handle || "").toLowerCase(),
+    displayName: profile.displayName || profile.nickname || "Learner",
+    nickname: profile.nickname || profile.displayName || "Learner",
+    bio: profile.bio || "",
+    xp: Number(profile.xp) || 0,
+    yearGroup: profile.yearGroup || "",
+    boards: profile.boards || {},
+    createdAt: profile.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
 }
 
 export async function saveProfileChoices(profileData, optIn) {
@@ -76,7 +93,14 @@ export async function saveProfileChoices(profileData, optIn) {
     updatedAt: new Date().toISOString()
   };
 
+  const existingSnapshot = await getDoc(userDocRef);
+  const existingProfile = existingSnapshot.exists() ? existingSnapshot.data() : {};
+  const oldHandle = String(existingProfile.handle || "").toLowerCase();
+  const newHandle = String(profileData.handle || "").toLowerCase();
+  if (!/^[a-z0-9_]{3,20}$/.test(newHandle)) throw new Error("Your handle must be 3–20 characters using letters, numbers or underscores.");
+  await setDoc(doc(null, "publicProfiles", newHandle), publicProfileData({ ...existingProfile, ...updates, uid }), { merge: true });
   await setDoc(userDocRef, updates, { merge: true });
+  if (oldHandle && oldHandle !== newHandle) await deleteDoc(doc(null, "publicProfiles", oldHandle));
 
   const publicRef = doc(null, "publicLeaderboard", uid);
   if (optIn) {
@@ -84,7 +108,7 @@ export async function saveProfileChoices(profileData, optIn) {
       uid,
       displayName: profileData.displayName,
       nickname: profileData.nickname,
-      handle: profileData.handle,
+      handle: newHandle,
       xpWeekly: 0,
       xpMonthly: 0,
       xpYearly: 0,

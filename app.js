@@ -220,7 +220,7 @@ function renderAuthState(user, profile = null) {
     button.hidden = Boolean(user);
   });
   const isPlaceholder = (value) => !value || ["learner", "student", "user"].includes(String(value).trim().toLowerCase());
-  const accountName = [profile?.nickname, profile?.displayName, user?.name, user?.email?.split("@")[0]].find((value) => !isPlaceholder(value)) || "";
+  const accountName = [profile?.displayName, profile?.nickname, user?.name].find((value) => !isPlaceholder(value)) || "";
   $("#auth-account-name").textContent = accountName;
   $("#auth-dashboard-link").hidden = true;
 }

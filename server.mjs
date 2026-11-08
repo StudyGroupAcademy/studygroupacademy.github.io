@@ -124,7 +124,7 @@ async function isGroupMember(client, uid, groupId) {
 }
 
 async function canReadRecord(client, uid, path) {
-  if (path[0] === "publicLeaderboard") return true;
+  if (path[0] === "publicLeaderboard" || path[0] === "publicProfiles") return true;
   if (!uid) return false;
   if (path[0] === "users") return path[1] === uid;
   if (path[0] === "groupCodes") return true;
@@ -142,6 +142,19 @@ async function authorizeMutation(client, uid, change, existing) {
   const path = change.path;
   if (path[0] === "users" && path[1] === uid) return uid;
   if (path[0] === "publicLeaderboard" && path[1] === uid) return uid;
+  if (path[0] === "publicProfiles" && path.length === 2) {
+    if (change.op === "delete") {
+      if (existing?.owner_id !== uid) throw new Error("You can only remove your own public profile.");
+      return uid;
+    }
+    const handle = String(change.data?.handle || path[1]).toLowerCase();
+    if (handle !== path[1] || !/^[a-z0-9_]{3,20}$/.test(handle)) throw new Error("Choose a valid profile handle.");
+    if (change.data?.uid !== uid) throw new Error("A public profile must belong to your signed-in account.");
+    if (existing && existing.owner_id !== uid) throw new Error("That profile handle is already taken. Choose another one.");
+    const collision = await client.query("SELECT owner_id FROM app_records WHERE path = $1", [`publicProfiles/${handle}`]);
+    if (collision.rowCount && collision.rows[0].owner_id !== uid) throw new Error("That profile handle is already taken. Choose another one.");
+    return uid;
+  }
   if (path[0] === "groupCodes" && path.length === 2) {
     if (change.op === "delete") {
       if (existing?.owner_id !== uid) throw new Error("Only the group owner can remove its invite code.");
@@ -164,6 +177,14 @@ async function authorizeMutation(client, uid, change, existing) {
     if (path.length === 2 && change.op !== "delete" && change.data?.ownerId !== undefined
       && change.data.ownerId !== group.data.ownerId) {
       throw new Error("Group ownership cannot be changed.");
+    }
+    if (path.length === 4 && path[2] === "messages" && existing
+      && existing.owner_id !== uid && group.data.ownerId !== uid) {
+      throw new Error("You can only edit or delete your own messages.");
+    }
+    if (path.length === 4 && path[2] === "messages" && change.op !== "delete"
+      && change.data?.uid !== undefined && change.data.uid !== uid) {
+      throw new Error("A message must belong to its sender.");
     }
     return uid;
   }
@@ -207,12 +228,16 @@ async function applyMutation(client, uid, change, trustedActivity = false) {
   const nextData = change.op === "update" || change.merge
     ? applyFields(existing?.data, change.data)
     : applyFields(null, change.data);
-  await client.query(
+  const saved = await client.query(
     `INSERT INTO app_records (path, owner_id, data, updated_at)
      VALUES ($1, $2, $3::jsonb, now())
-     ON CONFLICT (path) DO UPDATE SET owner_id = EXCLUDED.owner_id, data = EXCLUDED.data, updated_at = now()`,
+     ON CONFLICT (path) DO UPDATE SET owner_id = EXCLUDED.owner_id, data = EXCLUDED.data, updated_at = now()
+     WHERE app_records.owner_id = EXCLUDED.owner_id`,
     [path, ownerId, JSON.stringify(nextData)]
   );
+  if (path[0] === "publicProfiles" && saved.rowCount === 0) {
+    throw new Error("That profile handle is already taken. Choose another one.");
+  }
 }
 
 function readField(data, path) {
@@ -294,6 +319,11 @@ async function dataRequest(uid, body) {
         updatedAt: new Date().toISOString()
       });
       await pool.query("UPDATE app_records SET data = $2::jsonb, updated_at = now() WHERE path = $1", [userPath, JSON.stringify(profile)]);
+      if (profile.handle) {
+        const publicPath = `publicProfiles/${String(profile.handle).toLowerCase()}`;
+        const publicProfile = applyFields({}, { uid, handle: String(profile.handle).toLowerCase(), displayName: profile.displayName || profile.nickname || "Learner", nickname: profile.nickname || profile.displayName || "Learner", bio: profile.bio || "", xp: profile.xp, yearGroup: profile.yearGroup || "", boards: profile.boards || {}, createdAt: profile.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() });
+        await pool.query(`INSERT INTO app_records (path, owner_id, data, updated_at) VALUES ($1, $2, $3::jsonb, now()) ON CONFLICT (path) DO UPDATE SET data = EXCLUDED.data, updated_at = now() WHERE app_records.owner_id = EXCLUDED.owner_id`, [publicPath, uid, JSON.stringify(publicProfile)]);
+      }
       if (profile.leaderboardOptIn) {
         const publicPath = `publicLeaderboard/${uid}`;
         const publicRecord = await record(pool, publicPath);
