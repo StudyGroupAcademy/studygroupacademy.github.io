@@ -1,1215 +1,326 @@
-import { authClient } from "./auth-client.js";
-import { collection, completeActivity, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where } from "./firestore-client.js";
-import { $, $$, db, state } from "./core.js";
-import { ensureUserProfile, saveDailyGoal, saveProfileChoices, takeWelcomeFlag } from "./session.js";
-import { initResourceFilter, setLessonUser } from "./resources.js";
-
-const DEFAULT_SUBJECTS = ["Maths", "English", "Science", "Computer Science", "History", "Geography", "French", "Spanish"];
-
-let currentUser = null;
-let currentTab = "overview";
-let currentTaskFilter = "all";
-let currentBoard = "xp";
-let calendarDate = new Date();
-let activeGroupCode = null;
-let activeNoteId = null;
-let timerSeconds = 25 * 60;
-let timerRunning = false;
-let timerInterval = null;
-let timerMode = "focus";
-let activeDeck = null;
-let cardIndex = 0;
-let cardShowingAnswer = false;
-
-export async function initDashboard() {
-  bindNavigation();
-  bindForms();
-  bindProfileDialog();
-  bindCalculator();
-  bindTimer();
-  bindLeaderboardTabs();
-  bindNoteActions();
-  bindGroupActions();
-  bindSchoolActions();
-  
-  if (takeWelcomeFlag()) {
-    openProfileDialog(true);
-  }
-
-  try {
-    const sessionPromise = authClient.getSession();
-    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Auth timeout")), 3000));
-    
-    const sessionResult = await Promise.race([sessionPromise, timeoutPromise]);
-    currentUser = sessionResult.data?.user || null;
-  } catch (err) {
-    currentUser = null;
-  }
-
-  document.body.classList.remove("checking");
-
-  if (!currentUser) {
-    renderSignedOut();
-    return;
-  }
-
-  await handleSignedInUser(currentUser);
-}
-
-async function handleSignedInUser(user) {
-  currentUser = user;
-  const profile = await ensureUserProfile(user);
-  renderSignedIn(profile);
-  populateSubjectDropdowns();
-  setLessonUser(user);
-  initResourceFilter();
-  await loadAllPanelData();
-}
-
-function renderSignedIn(profile) {
-  const name = profile.nickname || profile.displayName || "Learner";
-  const initial = name.charAt(0).toUpperCase();
-  
-  const headerName = $("#header-name");
-  if (headerName) headerName.textContent = name;
-  const headerInitial = $("#header-initial");
-  if (headerInitial) headerInitial.textContent = initial;
-  const workspaceName = $("#workspace-name");
-  if (workspaceName) workspaceName.textContent = name;
-  const emailElem = $("#account-email");
-  if (emailElem) emailElem.textContent = currentUser?.email || "";
-  const handleElem = $("#account-handle");
-  if (handleElem) handleElem.textContent = `@${profile.handle || "user"}`;
-  
-  const tagElem = $("#workspace-name-tag");
-  if (tagElem) {
-    tagElem.hidden = !profile.leaderboardOptIn;
-    tagElem.textContent = "✳";
-  }
-
-  const memberXpVal = $("#member-xp-value");
-  if (memberXpVal) memberXpVal.textContent = profile.xp || 0;
-  const memberJoin = $("#member-join");
-  if (memberJoin) memberJoin.hidden = Boolean(profile.leaderboardOptIn);
-  const memberXp = $("#member-xp");
-  if (memberXp) memberXp.hidden = !profile.leaderboardOptIn;
-}
-
-function renderSignedOut() {
-  const headerName = $("#header-name");
-  if (headerName) headerName.textContent = "Sign in";
-  const workspaceName = $("#workspace-name");
-  if (workspaceName) workspaceName.textContent = "Learner";
-  const emailElem = $("#account-email");
-  if (emailElem) emailElem.textContent = "Not signed in";
-  const handleElem = $("#account-handle");
-  if (handleElem) handleElem.textContent = "Sign in to save progress";
-}
-
-function bindNavigation() {
-  $$(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      const targetTab = tab.dataset.tab;
-      if (!targetTab) return;
-      switchTab(targetTab);
-    });
-  });
-
-  const accountToggle = $("#account-toggle");
-  const popover = $("#account-popover");
-  if (accountToggle && popover) {
-    accountToggle.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const isHidden = popover.hidden;
-      popover.hidden = !isHidden;
-      accountToggle.setAttribute("aria-expanded", String(isHidden));
-    });
-    document.addEventListener("click", () => {
-      popover.hidden = true;
-      accountToggle.setAttribute("aria-expanded", "false");
-    });
-    popover.addEventListener("click", (e) => e.stopPropagation());
-  }
-
-  $$("[data-open-settings]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      $("#account-popover").hidden = true;
-      openProfileDialog(false);
-    });
-  });
-
-  const signOutBtn = $("#sign-out");
-  if (signOutBtn) {
-    signOutBtn.addEventListener("click", async () => {
-      await authClient.signOut();
-      window.location.href = "./";
-    });
-  }
-
-  const downloadBtn = $("#download-data");
-  if (downloadBtn) {
-    downloadBtn.addEventListener("click", downloadUserData);
-  }
-}
-
-function switchTab(tabName) {
-  currentTab = tabName;
-  $$(".tab").forEach((tab) => {
-    const active = tab.dataset.tab === tabName;
-    tab.classList.toggle("is-active", active);
-    tab.setAttribute("aria-selected", String(active));
-  });
-  $$(".panel").forEach((panel) => {
-    panel.hidden = panel.dataset.panel !== tabName;
-  });
-  window.location.hash = tabName;
-}
-
-function bindForms() {
-  const taskForm = $("#task-form");
-  if (taskForm) {
-    taskForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser) return;
-      const data = new FormData(taskForm);
-      const title = data.get("title").trim();
-      const subject = data.get("subject");
-      const due = data.get("due");
-      const time = data.get("time");
-      if (!title) return;
-
-      try {
-        await setDoc(doc(collection(db, "users", currentUser.uid, "tasks")), {
-          title,
-          subject,
-          due: due || null,
-          time: time || null,
-          completed: false,
-          createdAt: new Date().toISOString()
-        });
-        taskForm.reset();
-        await loadTasks();
-      } catch (err) {
-        console.error("Failed to add task:", err);
-      }
-    });
-  }
-
-  const examForm = $("#exam-form");
-  if (examForm) {
-    examForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser) return;
-      const data = new FormData(examForm);
-      const name = data.get("name").trim();
-      const subject = data.get("subject");
-      const examDate = data.get("examDate");
-      if (!name || !examDate) return;
-
-      try {
-        await setDoc(doc(collection(db, "users", currentUser.uid, "exams")), {
-          name,
-          subject,
-          examDate,
-          createdAt: new Date().toISOString()
-        });
-        examForm.reset();
-        await loadExams();
-      } catch (err) {
-        console.error("Failed to add exam:", err);
-      }
-    });
-  }
-
-  const scoreForm = $("#score-form");
-  if (scoreForm) {
-    scoreForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser) return;
-      const data = new FormData(scoreForm);
-      const name = data.get("name").trim();
-      const subject = data.get("subject");
-      const score = Number(data.get("score"));
-      const outOf = Number(data.get("outOf"));
-      const takenOn = data.get("takenOn");
-      if (!name || isNaN(score) || isNaN(outOf)) return;
-
-      try {
-        await setDoc(doc(collection(db, "users", currentUser.uid, "grades")), {
-          name,
-          subject,
-          score,
-          outOf,
-          takenOn,
-          createdAt: new Date().toISOString()
-        });
-        scoreForm.reset();
-        await loadGrades();
-      } catch (err) {
-        console.error("Failed to log grade:", err);
-      }
-    });
-  }
-
-  const deckForm = $("#deck-form");
-  if (deckForm) {
-    deckForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser) return;
-      const data = new FormData(deckForm);
-      const name = data.get("name").trim();
-      const subject = data.get("subject");
-      const rawCards = data.get("cards");
-      if (!name || !rawCards) return;
-
-      const cardLines = rawCards.split("\n").map(l => l.trim()).filter(Boolean);
-      const parsedCards = cardLines.map(line => {
-        const [q, a] = line.split("|").map(s => s?.trim());
-        return { question: q || "", answer: a || "" };
-      }).filter(c => c.question && c.answer);
-
-      if (!parsedCards.length) return;
-
-      try {
-        await setDoc(doc(collection(db, "users", currentUser.uid, "decks")), {
-          name,
-          subject,
-          cards: parsedCards,
-          createdAt: new Date().toISOString()
-        });
-        deckForm.reset();
-        await loadDecks();
-      } catch (err) {
-        console.error("Failed to save deck:", err);
-      }
-    });
-  }
-}
-
-function bindProfileDialog() {
-  const dialog = $("#profile-dialog");
-  const form = $("#profile-form");
-  if (!dialog || !form) return;
-
-  const closeBtn = dialog.querySelector("[data-close-dialog]");
-  if (closeBtn) {
-    closeBtn.addEventListener("click", () => dialog.close());
-  }
-
-  const linkGoogleBtn = $("#link-google");
-  if (linkGoogleBtn) {
-    linkGoogleBtn.addEventListener("click", async () => {
-      try {
-        const callbackBase = `${window.location.origin}${window.location.pathname}`;
-        await authClient.signIn.social({
-          provider: "google",
-          callbackURL: `${callbackBase}?oauth=google-linked`,
-          errorCallbackURL: `${callbackBase}?error=linking-failed`
-        });
-      } catch (err) {
-        const errBox = $("#profile-error");
-        if (errBox) {
-          errBox.hidden = false;
-          errBox.textContent = err.message || "Failed to link Google account.";
-        }
-      }
-    });
-  }
-
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    if (!currentUser) return;
-    const data = new FormData(form);
-    const nickname = data.get("nickname").trim();
-    const displayName = data.get("displayName").trim();
-    const handle = data.get("handle").trim().toLowerCase();
-    const bio = data.get("bio").trim();
-    const optIn = data.get("leaderboardOptIn") === "on";
-
-    const errBox = $("#profile-error");
-    try {
-      if (errBox) errBox.hidden = true;
-      await saveProfileChoices({ nickname, displayName, handle, bio }, optIn);
-      dialog.close();
-      const snapshot = await getDoc(doc(null, "users", currentUser.uid));
-      if (snapshot.exists()) {
-        renderSignedIn(snapshot.data());
-      }
-    } catch (err) {
-      if (errBox) {
-        errBox.hidden = false;
-        errBox.textContent = err.message || "Failed to save preferences.";
-      }
-    }
-  });
-}
-
-async function openProfileDialog(isWelcome) {
-  const dialog = $("#profile-dialog");
-  const form = $("#profile-form");
-  if (!dialog || !form || !currentUser) return;
-
-  const intro = $("#profile-intro");
-  if (intro) {
-    intro.textContent = isWelcome ? "Welcome! Set your preferences to get started." : "Update your profile and account settings.";
-  }
-
-  try {
-    const snap = await getDoc(doc(null, "users", currentUser.uid));
-    if (snap.exists()) {
-      const data = snap.data();
-      if (form.elements["nickname"]) form.elements["nickname"].value = data.nickname || "";
-      if (form.elements["displayName"]) form.elements["displayName"].value = data.displayName || "";
-      if (form.elements["handle"]) form.elements["handle"].value = data.handle || "";
-      if (form.elements["bio"]) form.elements["bio"].value = data.bio || "";
-      if (form.elements["leaderboardOptIn"]) form.elements["leaderboardOptIn"].checked = Boolean(data.leaderboardOptIn);
-    }
-  } catch (err) {
-    console.error("Failed to load user profile for dialog:", err);
-  }
-
-  dialog.showModal();
-}
-
-function bindCalculator() {
-  const display = $("#calculator-display");
-  const result = $("#calculator-result");
-  const keys = document.querySelector(".calculator-keys");
-  if (!display || !result || !keys) return;
-
-  keys.addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-calculator-key]");
-    if (!btn) return;
-    const key = btn.dataset.calculatorKey;
-
-    if (key === "clear") {
-      display.value = "";
-      result.textContent = "";
-      return;
-    }
-    if (key === "backspace") {
-      display.value = display.value.slice(0, -1);
-      calculateLive();
-      return;
-    }
-    if (key === "equals") {
-      calculateLive(true);
-      return;
-    }
-    display.value += key;
-    calculateLive();
-  });
-
-  display.addEventListener("input", () => calculateLive());
-  display.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      calculateLive(true);
-    }
-  });
-
-  function calculateLive(commit = false) {
-    const val = display.value.trim();
-    if (!val) {
-      result.textContent = "";
-      return;
-    }
-    try {
-      const sanitized = val.replace(/×/g, "*").replace(/÷/g, "/").replace(/%/g, "/100");
-      if (!/^[\d+\-*/().\s]+$/.test(sanitized)) {
-        if (commit) result.textContent = "Invalid expression";
-        return;
-      }
-      const evaluated = Function(`'use strict'; return (${sanitized})`)();
-      if (isNaN(evaluated) || !isFinite(evaluated)) {
-        if (commit) result.textContent = "Cannot evaluate";
-        return;
-      }
-      result.textContent = `= ${evaluated}`;
-      if (commit) {
-        display.value = String(evaluated);
-      }
-    } catch (err) {
-      if (commit) result.textContent = "Error";
-    }
-  }
-}
-
-function bindTimer() {
-  const toggleBtn = $("#timer-toggle");
-  const resetBtn = $("#timer-reset");
-  const logBtn = $("#timer-log");
-  const focusInput = $("#focus-minutes");
-  const breakInput = $("#break-minutes");
-  const display = $("#timer-display");
-  const label = $("#timer-label");
-  const ring = $("#timer-ring");
-
-  if (!toggleBtn || !display) return;
-
-  toggleBtn.addEventListener("click", () => {
-    if (timerRunning) {
-      pauseTimer();
-    } else {
-      startTimer();
-    }
-  });
-
-  resetBtn.addEventListener("click", () => {
-    pauseTimer();
-    const mins = timerMode === "focus" ? Number(focusInput?.value || 25) : Number(breakInput?.value || 5);
-    timerSeconds = mins * 60;
-    updateTimerDisplay();
-  });
-
-  logBtn.addEventListener("click", async () => {
-    await completeSession();
-  });
-
-  function startTimer() {
-    timerRunning = true;
-    toggleBtn.textContent = "Pause";
-    if (timerInterval) clearInterval(timerInterval);
-    timerInterval = setInterval(() => {
-      if (timerSeconds > 0) {
-        timerSeconds--;
-        updateTimerDisplay();
-      } else {
-        clearInterval(timerInterval);
-        timerRunning = false;
-        toggleBtn.textContent = "Start";
-        if (timerMode === "focus") {
-          completeSession(true);
-        }
-      }
-    }, 1000);
-  }
-
-  function pauseTimer() {
-    timerRunning = false;
-    toggleBtn.textContent = "Start";
-    if (timerInterval) clearInterval(timerInterval);
-  }
-
-  function updateTimerDisplay() {
-    const mins = Math.floor(timerSeconds / 60);
-    const secs = timerSeconds % 60;
-    display.textContent = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-  }
-}
-
-async function completeSession(autoLogged = false) {
-  if (!currentUser) return;
-  const focusInput = $("#focus-minutes");
-  const mins = Number(focusInput?.value || 25);
-  const subjectSelect = $("#timer-subject");
-  const subject = subjectSelect?.value || "Computer Science";
-
-  try {
-    await setDoc(doc(collection(db, "users", currentUser.uid, "sessions")), {
-      minutes: mins,
-      subject,
-      autoLogged,
-      createdAt: new Date().toISOString()
-    });
-
-    await loadSessions();
-    await loadStats();
-    
-    timerRunning = false;
-    const toggleBtn = $("#timer-toggle");
-    if (toggleBtn) toggleBtn.textContent = "Start";
-    if (timerInterval) clearInterval(timerInterval);
-    timerSeconds = mins * 60;
-    const minsField = $("#timer-display");
-    if (minsField) minsField.textContent = `${String(mins).padStart(2, "0")}:00`;
-  } catch (err) {
-    console.error("Failed to log study session:", err);
-  }
-}
-
-function bindLeaderboardTabs() {
-  $$("[data-board]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      $$("[data-board]").forEach((b) => b.classList.toggle("is-active", b === btn));
-      currentBoard = btn.dataset.board;
-      loadLeaderboard();
-    });
-  });
-
-  const refreshBtn = $("#refresh-leaderboard");
-  if (refreshBtn) {
-    refreshBtn.addEventListener("click", loadLeaderboard);
-  }
-
-  const joinBtn = $("#member-join button");
-  if (joinBtn) {
-    joinBtn.addEventListener("click", () => openProfileDialog(false));
-  }
-}
-
-function bindNoteActions() {
-  const newBtn = $("#note-new");
-  const form = $("#note-form");
-  if (newBtn && form) {
-    newBtn.addEventListener("click", () => {
-      activeNoteId = null;
-      form.reset();
-      const status = $("#note-status");
-      if (status) status.textContent = "New note";
-      const delBtn = $("#note-delete");
-      if (delBtn) delBtn.hidden = true;
-    });
-
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser) return;
-      const data = new FormData(form);
-      const title = data.get("title").trim();
-      const subject = data.get("subject");
-      const body = data.get("body");
-      if (!title) return;
-
-      try {
-        if (activeNoteId) {
-          await updateDoc(doc(db, "users", currentUser.uid, "notes", activeNoteId), {
-            title,
-            subject,
-            body,
-            updatedAt: new Date().toISOString()
-          });
-        } else {
-          await setDoc(doc(collection(db, "users", currentUser.uid, "notes")), {
-            title,
-            subject,
-            body,
-            createdAt: new Date().toISOString()
-          });
-        }
-        form.reset();
-        activeNoteId = null;
-        await loadNotes();
-      } catch (err) {
-        console.error("Failed to save note:", err);
-      }
-    });
-
-    const delBtn = $("#note-delete");
-    if (delBtn) {
-      delBtn.addEventListener("click", async () => {
-        if (!currentUser || !activeNoteId) return;
-        try {
-          await deleteDoc(doc(db, "users", currentUser.uid, "notes", activeNoteId));
-          form.reset();
-          activeNoteId = null;
-          delBtn.hidden = true;
-          await loadNotes();
-        } catch (err) {
-          console.error("Failed to delete note:", err);
-        }
-      });
-    }
-
-    const searchInput = $("#note-search");
-    if (searchInput) {
-      searchInput.addEventListener("input", loadNotes);
-    }
-  }
-}
-
-function bindGroupActions() {
-  const groupForm = $("#group-form");
-  if (groupForm) {
-    groupForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser) return;
-      const data = new FormData(groupForm);
-      const name = data.get("name").trim();
-      const subject = data.get("subject");
-      if (!name) return;
-
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      try {
-        await setDoc(doc(db, "studyGroups", code), {
-          name,
-          subject,
-          owner: currentUser.uid,
-          members: [currentUser.uid],
-          createdAt: new Date().toISOString()
-        });
-        groupForm.reset();
-        await loadGroups();
-        openGroupChat(code, name);
-      } catch (err) {
-        console.error("Failed to create group:", err);
-      }
-    });
-  }
-
-  const joinForm = $("#join-form");
-  if (joinForm) {
-    joinForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser) return;
-      const data = new FormData(joinForm);
-      const code = data.get("code").trim().toUpperCase();
-      if (!code) return;
-
-      try {
-        const groupRef = doc(db, "studyGroups", code);
-        const snap = await getDoc(groupRef);
-        if (!snap.exists()) {
-          alert("Group not found with that code.");
-          return;
-        }
-        const groupData = snap.data();
-        const members = groupData.members || [];
-        if (!members.includes(currentUser.uid)) {
-          members.push(currentUser.uid);
-          await updateDoc(groupRef, { members });
-        }
-        joinForm.reset();
-        await loadGroups();
-        openGroupChat(code, groupData.name);
-      } catch (err) {
-        console.error("Failed to join group:", err);
-      }
-    });
-  }
-
-  const chatForm = $("#chat-form");
-  if (chatForm) {
-    chatForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser || !activeGroupCode) return;
-      const data = new FormData(chatForm);
-      const text = data.get("text").trim();
-      if (!text) return;
-
-      try {
-        const profileSnap = await getDoc(doc(null, "users", currentUser.uid));
-        const senderName = profileSnap.exists() ? (profileSnap.data().nickname || profileSnap.data().displayName || "Learner") : "Learner";
-
-        await setDoc(doc(collection(db, "studyGroups", activeGroupCode, "messages")), {
-          text,
-          sender: currentUser.uid,
-          senderName,
-          createdAt: new Date().toISOString()
-        });
-        chatForm.reset();
-      } catch (err) {
-        console.error("Failed to send message:", err);
-      }
-    });
-  }
-
-  const copyBtn = $("#copy-code");
-  if (copyBtn) {
-    copyBtn.addEventListener("click", () => {
-      if (!activeGroupCode) return;
-      navigator.clipboard.writeText(activeGroupCode);
-      copyBtn.textContent = "Copied!";
-      setTimeout(() => copyBtn.textContent = "Copy invite code", 2000);
-    });
-  }
-
-  const leaveBtn = $("#leave-group");
-  if (leaveBtn) {
-    leaveBtn.addEventListener("click", async () => {
-      if (!currentUser || !activeGroupCode) return;
-      try {
-        const groupRef = doc(db, "studyGroups", activeGroupCode);
-        const snap = await getDoc(groupRef);
-        if (snap.exists()) {
-          const members = (snap.data().members || []).filter(id => id !== currentUser.uid);
-          await updateDoc(groupRef, { members });
-        }
-        activeGroupCode = null;
-        $("#chat-room").hidden = true;
-        $("#chat-empty").hidden = false;
-        await loadGroups();
-      } catch (err) {
-        console.error("Failed to leave group:", err);
-      }
-    });
-  }
-}
-
-function bindSchoolActions() {
-  const refreshBtn = $("#school-refresh");
-  if (refreshBtn) {
-    refreshBtn.addEventListener("click", loadSchoolData);
-  }
-}
-
-function populateSubjectDropdowns() {
-  $$("[data-subjects]").forEach((select) => {
-    const currentVal = select.value;
-    select.innerHTML = DEFAULT_SUBJECTS.map((sub) => `<option value="${sub}">${sub}</option>`).join("");
-    if (currentVal) select.value = currentVal;
-  });
-}
-
-async function loadAllPanelData() {
-  await Promise.all([
-    loadStats(),
-    loadTasks(),
-    loadExams(),
-    loadGrades(),
-    loadDecks(),
-    loadNotes(),
-    loadGroups(),
-    loadLeaderboard(),
-    loadSessions(),
-    loadSchoolData()
-  ]);
-}
-
-async function loadStats() {
-  if (!currentUser) return;
-  try {
-    const userSnap = await getDoc(doc(null, "users", currentUser.uid));
-    const userData = userSnap.exists() ? userSnap.data() : {};
-
-    const xpElem = $("#stat-xp");
-    if (xpElem) xpElem.textContent = userData.xp || 0;
-    const weekElem = $("#stat-week");
-    if (weekElem) weekElem.textContent = userData.weeklyMinutes || 0;
-
-    const tasksSnap = await getDocs(query(collection(db, "users", currentUser.uid, "tasks"), where("completed", "==", false)));
-    const openElem = $("#stat-open");
-    if (openElem) openElem.textContent = tasksSnap.docs.length;
-  } catch (err) {
-    console.error("Failed to load stats:", err);
-  }
-}
-
-async function loadTasks() {
-  if (!currentUser) return;
-  const container = $("#task-list");
-  const overviewContainer = $("#overview-tasks");
-  if (!container && !overviewContainer) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "tasks")));
-    const tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    if (container) {
-      container.innerHTML = tasks.length ? tasks.map(t => `
-        <div class="item-row ${t.completed ? "is-complete" : ""}">
-          <label><input type="checkbox" data-task-toggle="${t.id}" ${t.completed ? "checked" : ""} /> <span>${escapeHtml(t.title)}</span></label>
-          <span class="item-meta">${escapeHtml(t.subject || "")} · ${escapeHtml(t.due || "No due date")}</span>
-          <button class="button button-quiet" type="button" data-task-delete="${t.id}">Delete</button>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#f8f7f3" />
+    <title>Dashboard | StudyGroup</title>
+    <link rel="icon" type="image/png" href="../assets/favicon.png" />
+    <link rel="apple-touch-icon" href="../assets/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+    <script type="module" src="../dashboard.js"></script>
+  </head>
+  <body class="checking">
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="StudyGroup dashboard"><img src="../assets/wordmark.png" alt="StudyGroup" /></a>
+      <nav class="site-nav" aria-label="Main navigation">
+        <a href="#workspace">My workspace</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="workspace" id="workspace">
+        <div class="workspace-inner">
+          <div class="workspace-head">
+            <div><span class="eyebrow"><span></span> YOUR STUDY SPACE</span><h2>Hello, <span id="workspace-name">Learner</span> <span class="earned-name-tag" id="workspace-name-tag" hidden></span>.</h2><p>Choose a subject, learn one useful idea, and collect small wins as you go.</p></div>
+            <div class="stat-row">
+              <div class="stat"><strong id="stat-today">0</strong><small>minutes today</small></div>
+              <div class="stat"><strong id="stat-week">0</strong><small>minutes this week</small></div>
+              <div class="stat"><strong id="stat-streak">0</strong><small>day streak</small></div>
+              <div class="stat"><strong id="stat-open">0</strong><small>tasks open</small></div>
+              <div class="stat stat-xp"><strong id="stat-xp">0</strong><small>learning XP</small></div>
+            </div>
+          </div>
+          <nav class="tabs" role="tablist" aria-label="Study space navigation">
+            <span class="sidebar-label">YOUR STUDY SPACE</span>
+            <button class="tab is-active" type="button" role="tab" data-tab="overview" aria-selected="true"><span>⌂</span> Overview</button>
+            <button class="tab" type="button" role="tab" data-tab="planner" aria-selected="false"><span>▦</span> Planner</button>
+            <button class="tab" type="button" role="tab" data-tab="calculator" aria-selected="false"><span>±</span> Calculator</button>
+            <button class="tab" type="button" role="tab" data-tab="timer" aria-selected="false"><span>◷</span> Focus timer</button>
+            <button class="tab" type="button" role="tab" data-tab="cards" aria-selected="false"><span>▤</span> Flashcards</button>
+            <button class="tab" type="button" role="tab" data-tab="notes" aria-selected="false"><span>✎</span> Notes</button>
+            <button class="tab" type="button" role="tab" data-tab="grades" aria-selected="false"><span>↗</span> Grades</button>
+            <button class="tab" type="button" role="tab" data-tab="exams" aria-selected="false"><span>◫</span> Exams</button>
+            <button class="tab" type="button" role="tab" data-tab="groups" aria-selected="false"><span>◎</span> Study groups</button>
+            <button class="tab" type="button" role="tab" data-tab="school" aria-selected="false" id="school-tab"><span>⌂</span> School</button>
+            <button class="tab" type="button" role="tab" data-tab="leaderboard" aria-selected="false"><span>✳</span> Community</button>
+            <button class="tab" type="button" role="tab" data-tab="badges" aria-selected="false"><span>☆</span> Badges</button>
+            <div class="sidebar-account">
+              <div class="signed-in-menu" id="signed-in-menu">
+                <button class="user-chip" id="account-toggle" type="button" aria-expanded="false"><span class="user-chip-avatar" id="header-initial">S</span><span class="user-chip-name"><span id="header-name">Learner</span><span class="earned-name-tag" id="header-name-tag" hidden></span></span><span class="account-chevron" aria-hidden="true"></span></button>
+                <div class="account-popover" id="account-popover" hidden>
+                  <div class="account-email" id="account-email"></div>
+                  <div class="account-handle" id="account-handle"></div>
+                  <div class="account-badge" id="account-badge">Learner</div>
+                  <button type="button" data-open-settings>Profile & account settings</button>
+                  <button type="button" data-open-settings>Personalise my study space</button>
+                  <button type="button" id="download-data">Download my data</button>
+                  <button type="button" id="sign-out">Log out</button>
+                </div>
+              </div>
+            </div>
+          </nav>
+
+          <div class="panel" data-panel="overview">
+            <div class="study-home-layout">
+              <section class="subject-shelf">
+                <div class="subject-shelf-heading"><div><span class="eyebrow"><span></span> YOUR SUBJECTS</span><h3>Pick up where you like.</h3><p>Original, free StudyGroup lessons with worked examples and quick checks.</p></div></div>
+                <div class="subject-course-grid" id="subject-course-grid"></div>
+              </section>
+              <aside class="study-today">
+                <span class="eyebrow"><span></span> A GENTLE PLAN FOR TODAY</span><h3>Today's next steps</h3>
+                <div class="today-task-group"><h4>Your study plan</h4><div id="overview-tasks"></div></div>
+                <div class="today-task-group"><h4>School homework</h4><div id="today-school-homework"><p class="muted-line">Checking for school assignments…</p></div></div>
+                <button class="button button-light" type="button" data-tab="planner">Open your planner <span>→</span></button>
+              </aside>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="planner" hidden>
+            <form class="inline-form" id="task-form">
+              <input name="title" type="text" maxlength="120" placeholder="What do you need to get done?" aria-label="Task" required />
+              <select name="subject" data-subjects aria-label="Subject"></select>
+              <input name="due" type="date" aria-label="Due date" />
+              <input name="time" type="time" aria-label="Due time" />
+              <button class="button button-dark" type="submit">Add task</button>
+            </form>
+            <section class="calendar-card" aria-label="Homework calendar">
+              <div class="calendar-heading">
+                <div><span class="eyebrow"><span></span> YOUR STUDY SCHEDULE</span><h3 id="calendar-title">Month</h3></div>
+                <div class="calendar-controls"><button class="button button-light" id="calendar-today" type="button">Today</button><button class="button button-light" id="calendar-prev" type="button" aria-label="Previous month">←</button><button class="button button-light" id="calendar-next" type="button" aria-label="Next month">→</button></div>
+              </div>
+              <div class="calendar-weekdays" aria-hidden="true"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+              <div class="calendar-grid" id="calendar-grid" role="group" aria-label="Days in the month"></div>
+              <p class="calendar-selection" id="calendar-selection" aria-live="polite"></p>
+            </section>
+            <div class="filter-row">
+              <button class="chip is-active" type="button" data-task-filter="all">All</button>
+              <button class="chip" type="button" data-task-filter="active">To do</button>
+              <button class="chip" type="button" data-task-filter="done">Done</button>
+              <button class="chip chip-quiet" type="button" id="clear-done" hidden>Clear finished</button>
+            </div>
+            <div class="item-list" id="task-list"></div>
+          </div>
+
+          <div class="panel" data-panel="calculator" hidden>
+            <div class="calculator-card" id="calculator">
+              <div class="calculator-intro"><span class="eyebrow"><span></span> QUICK STUDY TOOL</span><h3>Calculator</h3><p>Use your keyboard or tap the buttons.</p></div>
+              <label class="calculator-screen" for="calculator-display"><span>Calculation</span><input id="calculator-display" type="text" inputmode="decimal" autocomplete="off" aria-label="Enter a calculation" placeholder="e.g. (24 × 3) ÷ 2" /><output id="calculator-result" aria-live="polite"></output></label>
+              <div class="calculator-keys" role="group" aria-label="Calculator keys">
+                <button type="button" data-calculator-key="clear">Clear</button><button type="button" data-calculator-key="(">(</button><button type="button" data-calculator-key=")">)</button><button type="button" data-calculator-key="backspace" aria-label="Backspace">⌫</button>
+                <button type="button" data-calculator-key="7">7</button><button type="button" data-calculator-key="8">8</button><button type="button" data-calculator-key="9">9</button><button type="button" class="calculator-operator" data-calculator-key="/">÷</button>
+                <button type="button" data-calculator-key="4">4</button><button type="button" data-calculator-key="5">5</button><button type="button" data-calculator-key="6">6</button><button type="button" class="calculator-operator" data-calculator-key="*">×</button>
+                <button type="button" data-calculator-key="1">1</button><button type="button" data-calculator-key="2">2</button><button type="button" data-calculator-key="3">3</button><button type="button" class="calculator-operator" data-calculator-key="-">−</button>
+                <button type="button" data-calculator-key="0">0</button><button type="button" data-calculator-key=".">.</button><button type="button" data-calculator-key="%">%</button><button type="button" class="calculator-operator" data-calculator-key="+">+</button>
+                <button type="button" class="calculator-equals" data-calculator-key="equals">Calculate</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="school" hidden>
+            <div class="school-panel-head"><div><span class="eyebrow"><span></span> SCHOOL WORKSPACE</span><h3 id="school-title">School accounts</h3><p id="school-summary">Personal study accounts stay private. A verified school can invite teachers and students here.</p></div><button type="button" class="button button-light" id="school-refresh">Refresh</button></div>
+            <div class="school-notice" id="school-status" role="status" aria-live="polite"></div>
+            <section class="card school-section" id="school-admin-section" hidden>
+              <h3>School applications to review</h3><div class="item-list" id="school-applications"></div>
+            </section>
+            <section class="card school-section" id="school-admin-notifications" hidden>
+              <h3>StudyGroup administrator notifications</h3><div class="item-list" id="school-admin-notifications-list"></div>
+            </section>
+            <div class="school-portal-grid" id="school-portal" hidden>
+              <section class="card school-section" id="school-invite-section" hidden>
+                <h3>Invite a teacher or student</h3>
+                <form class="stack-form" id="school-invite-form">
+                  <label>Email address<input name="email" type="email" maxlength="254" required /></label>
+                  <label>Account type<select name="role"><option value="teacher">Teacher</option><option value="student">Student</option></select></label>
+                  <fieldset class="permission-list"><legend>Grant these permissions</legend><div id="invite-permissions"></div></fieldset>
+                  <button class="button button-dark" type="submit">Create invite link</button>
+                  <p class="form-hint" id="invite-result" role="status"></p>
+                </form>
+              </section>
+              <section class="card school-section" id="school-assignment-create" hidden>
+                <h3>Post homework</h3>
+                <form class="stack-form" id="school-assignment-form">
+                  <label>Homework title<input name="title" maxlength="180" required /></label>
+                  <label>Subject<select name="subject" data-subjects></select></label>
+                  <label>Instructions<textarea name="instructions" maxlength="5000" required></textarea></label>
+                  <label>Due date and time<input name="dueAt" type="datetime-local" /></label>
+                  <label>Instructions file (optional)<input name="file" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.jpg,.jpeg,.png" /></label>
+                  <fieldset class="permission-list"><legend>Co-teachers</legend><div id="assignment-collaborators"></div></fieldset>
+                  <button class="button button-dark" type="submit">Post for my students</button>
+                </form>
+              </section>
+              <section class="card school-section school-work-list"><h3>Homework and submissions</h3><div class="item-list" id="school-assignments"></div></section>
+              <section class="card school-section"><h3>Account notifications</h3><div class="item-list" id="school-notifications"></div></section>
+            </div>
+            <section class="card school-section" id="school-application-state" hidden><h3>School application</h3><p id="school-application-message"></p></section>
+          </div>
+
+          <div class="panel" data-panel="timer" hidden>
+            <div class="timer-layout">
+              <div class="timer-card">
+                <div class="timer-ring" id="timer-ring" data-mode="focus"><div class="timer-face"><span id="timer-label">Focus</span><strong id="timer-display">25:00</strong></div></div>
+                <div class="timer-controls">
+                  <button class="button button-dark button-large" type="button" id="timer-toggle">Start</button>
+                  <button class="button button-light button-large" type="button" id="timer-reset">Reset</button>
+                  <button class="button button-light button-large" type="button" id="timer-log">Log and stop</button>
+                </div>
+                <div class="timer-settings">
+                  <label>Focus minutes<input id="focus-minutes" type="number" min="5" max="120" value="25" /></label>
+                  <label>Break minutes<input id="break-minutes" type="number" min="1" max="30" value="5" /></label>
+                  <label>Subject<select id="timer-subject" data-subjects></select></label>
+                </div>
+              </div>
+              <div class="timer-side">
+                <h3>Last 7 days</h3>
+                <div class="week-bars" id="week-bars"></div>
+                <h3>Recent sessions</h3>
+                <div class="item-list" id="session-list"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="cards" hidden>
+            <div class="two-col">
+              <form class="stack-form" id="deck-form">
+                <h3>New flashcard deck</h3>
+                <label>Deck name<input name="name" type="text" maxlength="40" placeholder="e.g. Cell biology" required /></label>
+                <label>Subject<select name="subject" data-subjects></select></label>
+                <label>Cards<textarea name="cards" rows="7" placeholder="What is the powerhouse of the cell? | Mitochondria&#10;What does DNA stand for? | Deoxyribonucleic acid" required></textarea></label>
+                <small class="form-hint">One card per line, written as question | answer. Up to 100 cards.</small>
+                <button class="button button-dark" type="submit">Save deck</button>
+              </form>
+              <div><h3>Your decks</h3><div class="item-list" id="deck-list"></div></div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="groups" hidden>
+            <div class="group-layout">
+              <div class="group-side">
+                <form class="stack-form" id="group-form">
+                  <h3>Start a group</h3>
+                  <label>Group name<input name="name" type="text" minlength="2" maxlength="40" placeholder="e.g. Year 11 Science" required /></label>
+                  <label>Subject<select name="subject" data-subjects></select></label>
+                  <button class="button button-dark" type="submit">Create group</button>
+                </form>
+                <form class="stack-form" id="join-form">
+                  <h3>Join with a code</h3>
+                  <label>Invite code<input name="code" type="text" maxlength="6" minlength="6" placeholder="ABC123" autocapitalize="characters" autocomplete="off" required /></label>
+                  <button class="button button-light" type="submit">Join group</button>
+                </form>
+                <div><h3>Your groups</h3><div class="group-list" id="group-list"></div></div>
+              </div>
+              <div class="chat">
+                <div class="chat-empty" id="chat-empty"><span>◎</span><strong>Pick a group to open its chat</strong><p>Groups are private. Only people with the invite code can join, and only members can read messages.</p></div>
+                <div class="chat-room" id="chat-room" hidden>
+                  <div class="chat-head"><div><strong id="chat-title"></strong><small id="chat-meta"></small></div><div class="chat-actions"><button class="button button-light" type="button" id="copy-code">Copy invite code</button><button class="button button-light" type="button" id="leave-group">Leave group</button></div></div>
+                  <div class="chat-messages" id="chat-messages" aria-live="polite"></div>
+                  <form class="chat-form" id="chat-form"><input name="text" type="text" maxlength="500" placeholder="Message your group" autocomplete="off" aria-label="Message" /><button class="button button-dark" type="submit">Send</button></form>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="exams" hidden>
+            <form class="inline-form" id="exam-form">
+              <input name="name" type="text" maxlength="60" placeholder="e.g. Maths Paper 1" aria-label="Exam name" required />
+              <select name="subject" data-subjects aria-label="Subject"></select>
+              <input name="examDate" type="date" aria-label="Exam date" required />
+              <button class="button button-dark" type="submit">Add exam</button>
+            </form>
+            <div class="item-list" id="exam-list"></div>
+          </div>
+
+          <div class="panel" data-panel="notes" hidden>
+            <div class="notes-layout">
+              <div class="notes-side">
+                <div class="notes-tools"><input id="note-search" type="search" placeholder="Search notes" aria-label="Search notes" /><button class="button button-dark" id="note-new" type="button">New note</button></div>
+                <div class="group-list" id="note-list"></div>
+              </div>
+              <form class="stack-form note-editor" id="note-form">
+                <input name="title" type="text" maxlength="60" placeholder="Note title" aria-label="Note title" required />
+                <select name="subject" data-subjects aria-label="Subject"></select>
+                <textarea name="body" rows="14" maxlength="5000" placeholder="Write your notes here" aria-label="Note text"></textarea>
+                <div class="note-actions"><small id="note-status">New note</small><button class="button button-light" type="button" id="note-delete" hidden>Delete</button><button class="button button-dark" type="submit">Save note</button></div>
+              </form>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="grades" hidden>
+            <form class="inline-form score-form" id="score-form">
+              <input name="name" type="text" maxlength="60" placeholder="e.g. Paper 1 mock" aria-label="Test name" required />
+              <select name="subject" data-subjects aria-label="Subject"></select>
+              <input name="score" type="number" min="0" step="0.5" placeholder="Score" aria-label="Score" required />
+              <input name="outOf" type="number" min="1" max="1000" step="1" placeholder="Out of" aria-label="Out of" required />
+              <input name="takenOn" type="date" aria-label="Date taken" required />
+              <button class="button button-dark" type="submit">Log result</button>
+            </form>
+            <div class="two-col">
+              <div><h3>By subject</h3><div class="item-list" id="score-summary"></div></div>
+              <div><h3>All results</h3><div class="item-list" id="score-list"></div></div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="leaderboard" hidden>
+            <div class="leaderboard-tab">
+              <div class="leaderboard-card">
+                <div class="leaderboard-header"><div><span class="leaderboard-label"><i></i> OUR STUDY COMMUNITY</span><h3>A little goes a long way</h3></div><button class="refresh-button" id="refresh-leaderboard" type="button" aria-label="Refresh leaderboard" title="Refresh">↻</button></div>
+                <p class="leaderboard-subtitle" id="leaderboard-subtitle">Earn XP by completing tasks and focus time. Every learner starts with a fresh page.</p>
+                <div class="filter-row board-switch"><button class="chip is-active" type="button" data-board="xp">Total XP</button><button class="chip" type="button" data-board="focus">Focus this week</button></div>
+                <div id="leaderboard-list" class="leaderboard-list" data-size="10" aria-live="polite"><div class="leaderboard-loading"><span class="loading-spinner"></span> Finding our study buddies…</div></div>
+                <p class="my-rank" id="my-rank"></p>
+                <div class="leaderboard-footer"><span id="leaderboard-footnote">XP from completed activities</span><span>Opt-in · name tag included <b>✳</b></span></div>
+                <div class="member-xp" id="member-xp" hidden><span>Your earned study XP</span><strong><span id="member-xp-value">0</span> XP</strong></div>
+                <div class="member-join" id="member-join" hidden><span>Opt in to show your chosen study name and name tag.</span><button type="button">Join the XP leaderboard</button></div>
+              </div>
+              <div class="card how-card">
+                <h3>How it works</h3>
+                <p>Opt in from your profile and your chosen study name joins the board. Your email stays private.</p>
+                <p><strong>Focus this week</strong> adds up the minutes from your focus timer and resets every Monday.</p>
+                <p class="privacy-note" id="privacy-note"><span>♧</span> Only your chosen nickname appears on the public board.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="badges" hidden>
+            <p class="badge-summary" id="badge-summary"></p>
+            <div class="badge-grid" id="badge-grid"></div>
+          </div>
         </div>
-      `).join("") : `<p class="muted-line">No tasks added yet.</p>`;
+      </section>
+    </main>
 
-      container.querySelectorAll("[data-task-toggle]").forEach(chk => {
-        chk.addEventListener("change", async (e) => {
-          const id = e.target.dataset.taskToggle;
-          await updateDoc(doc(db, "users", currentUser.uid, "tasks", id), { completed: e.target.checked });
-          await loadTasks();
-          await loadStats();
-        });
-      });
+    <footer class="site-footer"><a class="brand footer-brand" href="./"><img src="../assets/wordmark.png" alt="StudyGroup" /></a><span>Built for curious minds, one student at a time.</span><span>Your nickname stays yours <b>✳</b></span></footer>
 
-      container.querySelectorAll("[data-task-delete]").forEach(btn => {
-        btn.addEventListener("click", async (e) => {
-          const id = e.target.dataset.taskDelete;
-          await deleteDoc(doc(db, "users", currentUser.uid, "tasks", id));
-          await loadTasks();
-          await loadStats();
-        });
-      });
-    }
+    <dialog class="app-dialog" id="profile-dialog" aria-labelledby="profile-title">
+      <form class="dialog-form" id="profile-form">
+        <button class="dialog-close" type="button" data-close-dialog aria-label="Close dialog">×</button>
+        <div class="dialog-mark"><img src="../assets/favicon.png" alt="" /></div>
+        <span class="eyebrow"><span></span> YOUR STUDY SPACE, YOUR WAY</span>
+        <h2 id="profile-title">Make yourself at home.</h2><p class="dialog-intro" id="profile-intro">Choose the nickname students see. Your email stays private.</p>
+        <div class="auth-error" id="profile-error" role="alert" hidden></div>
+        <div class="profile-intro-grid"><span class="profile-step">01</span><span><strong>Make it yours</strong><small>These details help personalise your learning space.</small></span></div>
+        <label>Your study nickname<input name="nickname" type="text" minlength="2" maxlength="24" autocomplete="nickname" pattern="[A-Za-z0-9 _.\-]{2,24}" required /></label>
+        <label>Your account name<input name="displayName" type="text" minlength="2" maxlength="60" autocomplete="name" required /></label>
+        <label>Your handle<input name="handle" type="text" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" placeholder="yourname_1234" autocomplete="username" required /><small class="form-hint">Shown with an @. A short account-specific suffix is added to new handles.</small></label>
+        <label>A short bio<textarea name="bio" maxlength="240" rows="3" placeholder="A little about what you are learning…"></textarea></label>
+        <label class="opt-in-field"><input name="leaderboardOptIn" type="checkbox" /><span><strong>Show my nickname on the leaderboard</strong><small>One friendly daily check-in. Opt out whenever you like.</small></span></label>
+        <button class="button button-light" id="link-google" type="button">Connect Google</button>
+        <small class="form-hint">If Google sign-in says your account is not linked, first log in here with your StudyGroup email and password, then connect Google.</small>
+        <button class="button button-dark dialog-submit" type="submit">Save my preferences <span>→</span></button>
+      </form>
+    </dialog>
 
-    if (overviewContainer) {
-      const activeTasks = tasks.filter(t => !t.completed).slice(0, 3);
-      overviewContainer.innerHTML = activeTasks.length ? activeTasks.map(t => `
-        <div class="today-task">
-          <strong>${escapeHtml(t.title)}</strong>
-          <span>${escapeHtml(t.subject || "")}</span>
-        </div>
-      `).join("") : `<p class="muted-line">All caught up for today!</p>`;
-    }
-  } catch (err) {
-    console.error("Failed to load tasks:", err);
-  }
-}
-
-async function loadExams() {
-  if (!currentUser) return;
-  const container = $("#exam-list");
-  if (!container) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "exams")));
-    const exams = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    container.innerHTML = exams.length ? exams.map(ex => `
-      <div class="item-row">
-        <div><strong>${escapeHtml(ex.name)}</strong><span class="item-meta">${escapeHtml(ex.subject)} · Exam date: ${escapeHtml(ex.examDate)}</span></div>
-        <button class="button button-quiet" type="button" data-exam-delete="${ex.id}">Delete</button>
+    <dialog class="app-dialog study-dialog" id="study-dialog" aria-labelledby="study-title">
+      <div class="dialog-form">
+        <button class="dialog-close" type="button" data-close-dialog aria-label="Close dialog">×</button>
+        <span class="eyebrow"><span></span> FLASHCARDS</span>
+        <h2 id="study-title">Deck</h2>
+        <div id="study-body"></div>
       </div>
-    `).join("") : `<p class="muted-line">No exams scheduled.</p>`;
-
-    container.querySelectorAll("[data-exam-delete]").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
-        const id = e.target.dataset.examDelete;
-        await deleteDoc(doc(db, "users", currentUser.uid, "exams", id));
-        await loadExams();
-      });
-    });
-  } catch (err) {
-    console.error("Failed to load exams:", err);
-  }
-}
-
-async function loadGrades() {
-  if (!currentUser) return;
-  const listContainer = $("#score-list");
-  const summaryContainer = $("#score-summary");
-  if (!listContainer || !summaryContainer) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "grades")));
-    const grades = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    listContainer.innerHTML = grades.length ? grades.map(g => `
-      <div class="item-row">
-        <div><strong>${escapeHtml(g.name)}</strong><span class="item-meta">${escapeHtml(g.subject)} · Score: ${g.score} / ${g.outOf} (${Math.round((g.score/g.outOf)*100)}%)</span></div>
-        <button class="button button-quiet" type="button" data-grade-delete="${g.id}">Delete</button>
-      </div>
-    `).join("") : `<p class="muted-line">No results logged yet.</p>`;
-
-    listContainer.querySelectorAll("[data-grade-delete]").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
-        const id = e.target.dataset.gradeDelete;
-        await deleteDoc(doc(db, "users", currentUser.uid, "grades", id));
-        await loadGrades();
-      });
-    });
-
-    const bySubject = {};
-    grades.forEach(g => {
-      if (!bySubject[g.subject]) bySubject[g.subject] = { totalPct: 0, count: 0 };
-      bySubject[g.subject].totalPct += (g.score / g.outOf) * 100;
-      bySubject[g.subject].count++;
-    });
-
-    summaryContainer.innerHTML = Object.keys(bySubject).length ? Object.entries(bySubject).map(([sub, data]) => `
-      <div class="item-row">
-        <span><strong>${escapeHtml(sub)}</strong></span>
-        <span>${Math.round(data.totalPct / data.count)}% average (${data.count} logged)</span>
-      </div>
-    `).join("") : `<p class="muted-line">No subject summaries available.</p>`;
-  } catch (err) {
-    console.error("Failed to load grades:", err);
-  }
-}
-
-async function loadDecks() {
-  if (!currentUser) return;
-  const container = $("#deck-list");
-  if (!container) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "decks")));
-    const decks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    container.innerHTML = decks.length ? decks.map(d => `
-      <div class="item-row">
-        <div><strong>${escapeHtml(d.name)}</strong><span class="item-meta">${escapeHtml(d.subject)} · ${d.cards?.length || 0} cards</span></div>
-        <div class="item-actions">
-          <button class="button button-light" type="button" data-deck-study="${d.id}">Study</button>
-          <button class="button button-quiet" type="button" data-deck-delete="${d.id}">Delete</button>
-        </div>
-      </div>
-    `).join("") : `<p class="muted-line">No flashcard decks created.</p>`;
-
-    container.querySelectorAll("[data-deck-study]").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const id = e.target.dataset.deckStudy;
-        const deck = decks.find(d => d.id === id);
-        if (deck) startFlashcardStudy(deck);
-      });
-    });
-
-    container.querySelectorAll("[data-deck-delete]").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
-        const id = e.target.dataset.deckDelete;
-        await deleteDoc(doc(db, "users", currentUser.uid, "decks", id));
-        await loadDecks();
-      });
-    });
-  } catch (err) {
-    console.error("Failed to load decks:", err);
-  }
-}
-
-function startFlashcardStudy(deck) {
-  activeDeck = deck;
-  cardIndex = 0;
-  cardShowingAnswer = false;
-  const dialog = $("#study-dialog");
-  const title = $("#study-title");
-  const body = $("#study-body");
-  if (!dialog || !title || !body) return;
-
-  title.textContent = deck.name;
-  renderCard();
-  dialog.showModal();
-
-  const closeBtn = dialog.querySelector("[data-close-dialog]");
-  if (closeBtn) {
-    closeBtn.onclick = () => dialog.close();
-  }
-}
-
-function renderCard() {
-  const body = $("#study-body");
-  if (!activeDeck || !body) return;
-  const cards = activeDeck.cards || [];
-  if (cardIndex >= cards.length) {
-    body.innerHTML = `
-      <div class="flashcard-finished">
-        <h3>You finished this deck!</h3>
-        <p>Great job reviewing your flashcards.</p>
-        <button class="button button-dark" type="button" id="study-restart">Study again</button>
-      </div>
-    `;
-    $("#study-restart")?.addEventListener("click", () => {
-      cardIndex = 0;
-      cardShowingAnswer = false;
-      renderCard();
-    });
-    return;
-  }
-
-  const card = cards[cardIndex];
-  body.innerHTML = `
-    <div class="flashcard-card ${cardShowingAnswer ? "is-flipped" : ""}" id="flashcard-box">
-      <span class="flashcard-counter">Card ${cardIndex + 1} of ${cards.length}</span>
-      <div class="flashcard-content">
-        <h4>${cardShowingAnswer ? "Answer" : "Question"}</h4>
-        <p>${escapeHtml(cardShowingAnswer ? card.answer : card.question)}</p>
-      </div>
-      <button class="button button-light" type="button" id="flip-card">${cardShowingAnswer ? "Show question" : "Show answer"}</button>
-    </div>
-    <div class="flashcard-nav">
-      <button class="button button-dark" type="button" id="next-card" ${cardShowingAnswer ? "" : "disabled"}>Next card →</button>
-    </div>
-  `;
-
-  $("#flip-card").addEventListener("click", () => {
-    cardShowingAnswer = !cardShowingAnswer;
-    renderCard();
-  });
-
-  $("#next-card")?.addEventListener("click", () => {
-    cardIndex++;
-    cardShowingAnswer = false;
-    renderCard();
-  });
-}
-
-async function loadNotes() {
-  if (!currentUser) return;
-  const container = $("#note-list");
-  const form = $("#note-form");
-  const searchInput = $("#note-search");
-  if (!container || !form) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "notes")));
-    let notes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    const term = searchInput?.value?.trim()?.toLowerCase();
-    if (term) {
-      notes = notes.filter(n => n.title.toLowerCase().includes(term) || n.body?.toLowerCase().includes(term));
-    }
-
-    container.innerHTML = notes.length ? notes.map(n => `
-      <button class="group-item ${n.id === activeNoteId ? "is-active" : ""}" type="button" data-note-select="${n.id}">
-        <strong>${escapeHtml(n.title)}</strong>
-        <small>${escapeHtml(n.subject || "")}</small>
-      </button>
-    `).join("") : `<p class="muted-line">No notes found.</p>`;
-
-    container.querySelectorAll("[data-note-select]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset.noteSelect;
-        const note = notes.find(n => n.id === id);
-        if (note) {
-          activeNoteId = note.id;
-          form.elements["title"].value = note.title;
-          form.elements["subject"].value = note.subject || DEFAULT_SUBJECTS[0];
-          form.elements["body"].value = note.body || "";
-          const status = $("#note-status");
-          if (status) status.textContent = "Editing saved note";
-          const delBtn = $("#note-delete");
-          if (delBtn) delBtn.hidden = false;
-          loadNotes();
-        }
-      });
-    });
-  } catch (err) {
-    console.error("Failed to load notes:", err);
-  }
-}
-
-async function loadGroups() {
-  if (!currentUser) return;
-  const container = $("#group-list");
-  if (!container) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "studyGroups"), where("members", "array-contains", currentUser.uid)));
-    const groups = snap.docs.map(d => ({ code: d.id, ...d.data() }));
-
-    container.innerHTML = groups.length ? groups.map(g => `
-      <button class="group-item ${g.code === activeGroupCode ? "is-active" : ""}" type="button" data-group-select="${g.code}" data-group-name="${escapeHtml(g.name)}">
-        <strong>${escapeHtml(g.name)}</strong>
-        <small>${escapeHtml(g.subject)} · ${g.members?.length || 1} members</small>
-      </button>
-    `).join("") : `<p class="muted-line">Not in any study groups yet.</p>`;
-
-    container.querySelectorAll("[data-group-select]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const code = btn.dataset.groupSelect;
-        const name = btn.dataset.groupName;
-        openGroupChat(code, name);
-      });
-    });
-  } catch (err) {
-    console.error("Failed to load groups:", err);
-  }
-}
-
-async function openGroupChat(code, name) {
-  activeGroupCode = code;
-  $("#chat-empty").hidden = true;
-  const room = $("#chat-room");
-  room.hidden = false;
-  $("#chat-title").textContent = name;
-  $("#chat-meta").textContent = `Invite code: ${code}`;
-
-  await loadChatMessages(code);
-  await loadGroups();
-}
-
-async function loadChatMessages(code) {
-  const container = $("#chat-messages");
-  if (!container) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "studyGroups", code, "messages")));
-    const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    msgs.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-    container.innerHTML = msgs.length ? msgs.map(m => `
-      <div class="chat-message ${m.sender === currentUser?.uid ? "is-mine" : ""}">
-        <span class="chat-sender">${escapeHtml(m.senderName || "Learner")}</span>
-        <p>${escapeHtml(m.text)}</p>
-      </div>
-    `).join("") : `<p class="muted-line">No messages yet. Say hello!</p>`;
-
-    container.scrollTop = container.scrollHeight;
-  } catch (err) {
-    console.error("Failed to load messages:", err);
-  }
-}
-
-async function loadLeaderboard() {
-  const container = $("#leaderboard-list");
-  const rankElem = $("#my-rank");
-  if (!container) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "publicLeaderboard")));
-    let entries = snap.docs.map(d => d.data());
-
-    if (currentBoard === "xp") {
-      entries.sort((a, b) => (b.xp || 0) - (a.xp || 0));
-    } else {
-      entries.sort((a, b) => (b.weeklyMinutes || 0) - (a.weeklyMinutes || 0));
-    }
-
-    container.innerHTML = entries.length ? entries.slice(0, 10).map((e, idx) => `
-      <div class="leaderboard-row ${e.uid === currentUser?.uid ? "is-me" : ""}">
-        <span class="rank-num">#${idx + 1}</span>
-        <span class="rank-name">${escapeHtml(e.nickname || e.displayName || "Learner")} ✳</span>
-        <span class="rank-score">${currentBoard === "xp" ? `${e.xp || 0} XP` : `${e.weeklyMinutes || 0} mins`}</span>
-      </div>
-    `).join("") : `<p class="muted-line">No members on the leaderboard yet. Opt in from your profile!</p>`;
-
-    if (currentUser && rankElem) {
-      const myIdx = entries.findIndex(e => e.uid === currentUser.uid);
-      rankElem.textContent = myIdx !== -1 ? `Your rank: #${myIdx + 1}` : "You are not currently on the public leaderboard. Opt in via your profile settings!";
-    }
-  } catch (err) {
-    console.error("Failed to load leaderboard:", err);
-    container.innerHTML = `<p class="muted-line">Could not load leaderboard.</p>`;
-  }
-}
-
-async function loadSessions() {
-  if (!currentUser) return;
-  const listContainer = $("#session-list");
-  const barsContainer = $("#week-bars");
-  if (!listContainer || !barsContainer) return;
-
-  try {
-    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "sessions")));
-    const sessions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    sessions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    listContainer.innerHTML = sessions.length ? sessions.slice(0, 5).map(s => `
-      <div class="item-row">
-        <span><strong>${s.minutes} mins focus</strong></span>
-        <span class="item-meta">${escapeHtml(s.subject)} · ${new Date(s.createdAt).toLocaleDateString()}</span>
-      </div>
-    `).join("") : `<p class="muted-line">No study sessions logged yet.</p>`;
-
-    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    barsContainer.innerHTML = days.map(d => `
-      <div class="week-bar-col">
-        <div class="week-bar"><i></i></div>
-        <span>${d}</span>
-      </div>
-    `).join("");
-  } catch (err) {
-    console.error("Failed to load sessions:", err);
-  }
-}
-
-async function loadSchoolData() {
-  const statusElem = $("#school-status");
-  if (statusElem) {
-    statusElem.textContent = "School workspace is available.";
-  }
-}
-
-async function downloadUserData() {
-  if (!currentUser) return;
-  try {
-    const data = {
-      uid: currentUser.uid,
-      email: currentUser.email,
-      exportedAt: new Date().toISOString()
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "studygroup-data.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (err) {
-    console.error("Failed to download data:", err);
-  }
-}
-
-function escapeHtml(str) {
-  return String(str || "").replace(/[&<>"']/g, (m) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  })[m]);
-}
+    </dialog>
+  </body>
+</html>
