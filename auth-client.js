@@ -73,14 +73,24 @@ export async function getCurrentSession({ retries = 0, retryDelay = 250 } = {}) 
 }
 
 export async function getAuthToken() {
-  if (typeof authClient.token === "function") {
-    const tokenResult = await authClient.token();
-    if (tokenResult?.error) throw tokenResult.error;
-    const jwt = tokenResult?.data?.token || tokenResult?.token;
-    if (typeof jwt === "string" && jwt.length > 0) return jwt;
+  const tokenUrl = new URL("token", `${AUTH_BASE_URL.replace(/\/$/, "")}/`);
+  const response = await fetch(tokenUrl, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    headers: { Accept: "application/json" }
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = payload?.message || payload?.error?.message || payload?.error || `Neon Auth token request failed (${response.status}).`;
+    throw new Error(String(message));
   }
 
-  throw new Error(
-    "Neon Auth did not return a JWT. Check that the Neon Auth JWT plugin is enabled for this branch and that your session is active."
-  );
+  const token = payload?.token || payload?.data?.token;
+  if (typeof token !== "string" || !token.trim()) {
+    throw new Error("Neon Auth did not return a JWT. Please sign in again.");
+  }
+
+  return token;
 }
