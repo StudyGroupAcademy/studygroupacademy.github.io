@@ -64,7 +64,6 @@ async function handleSignedInUser(user) {
   setLessonUser(user);
   initResourceFilter();
   await loadAllPanelData();
-  startRealtimeListeners();
 }
 
 function renderSignedIn(profile) {
@@ -327,17 +326,10 @@ function bindProfileDialog() {
     const bio = data.get("bio").trim();
     const optIn = data.get("leaderboardOptIn") === "on";
 
-    const boards = {};
-    DEFAULT_SUBJECTS.forEach((sub) => {
-      const key = `board-${sub.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
-      const val = data.get(key);
-      if (val) boards[sub] = val;
-    });
-
     const errBox = $("#profile-error");
     try {
       if (errBox) errBox.hidden = true;
-      await saveProfileChoices({ nickname, displayName, handle, bio, boards }, optIn);
+      await saveProfileChoices({ nickname, displayName, handle, bio }, optIn);
       dialog.close();
       const snapshot = await getDoc(doc(null, "users", currentUser.uid));
       if (snapshot.exists()) {
@@ -371,13 +363,6 @@ async function openProfileDialog(isWelcome) {
       if (form.elements["handle"]) form.elements["handle"].value = data.handle || "";
       if (form.elements["bio"]) form.elements["bio"].value = data.bio || "";
       if (form.elements["leaderboardOptIn"]) form.elements["leaderboardOptIn"].checked = Boolean(data.leaderboardOptIn);
-
-      DEFAULT_SUBJECTS.forEach((sub) => {
-        const key = `board-${sub.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
-        if (form.elements[key]) {
-          form.elements[key].value = data.boards?.[sub] || "";
-        }
-      });
     }
   } catch (err) {
     console.error("Failed to load user profile for dialog:", err);
@@ -480,20 +465,6 @@ function bindTimer() {
     await completeSession();
   });
 
-  focusInput?.addEventListener("change", () => {
-    if (!timerRunning && timerMode === "focus") {
-      timerSeconds = Number(focusInput.value) * 60;
-      updateTimerDisplay();
-    }
-  });
-
-  breakInput?.addEventListener("change", () => {
-    if (!timerRunning && timerMode === "break") {
-      timerSeconds = Number(breakInput.value) * 60;
-      updateTimerDisplay();
-    }
-  });
-
   function startTimer() {
     timerRunning = true;
     toggleBtn.textContent = "Pause";
@@ -508,12 +479,6 @@ function bindTimer() {
         toggleBtn.textContent = "Start";
         if (timerMode === "focus") {
           completeSession(true);
-        } else {
-          timerMode = "focus";
-          if (label) label.textContent = "Focus";
-          if (ring) ring.dataset.mode = "focus";
-          timerSeconds = Number(focusInput?.value || 25) * 60;
-          updateTimerDisplay();
         }
       }
     }, 1000);
@@ -547,7 +512,6 @@ async function completeSession(autoLogged = false) {
       createdAt: new Date().toISOString()
     });
 
-    await addWeeklyMinutes(mins);
     await loadSessions();
     await loadStats();
     
@@ -614,7 +578,7 @@ function bindNoteActions() {
             updatedAt: new Date().toISOString()
           });
         } else {
-          const ref = await setDoc(doc(collection(db, "users", currentUser.uid, "notes")), {
+          await setDoc(doc(collection(db, "users", currentUser.uid, "notes")), {
             title,
             subject,
             body,
@@ -799,8 +763,6 @@ async function loadAllPanelData() {
     loadSchoolData()
   ]);
 }
-
-function startRealtimeListeners() {}
 
 async function loadStats() {
   if (!currentUser) return;
