@@ -9,6 +9,25 @@ export const authClient = createAuthClient(
   }
 );
 
+export function getSessionUser(result) {
+  const data = result?.data || result || {};
+  return data.user || data.session?.user || data.data?.user || data.data?.session?.user || null;
+}
+
+export function getSessionRecord(result) {
+  const data = result?.data || result || {};
+  return data.session || data.data?.session || null;
+}
+
+export function normalizeSessionResult(result) {
+  const data = result?.data || {};
+  return {
+    ...data,
+    user: getSessionUser(result),
+    session: getSessionRecord(result)
+  };
+}
+
 export async function getAuthToken() {
   if (typeof authClient.token === "function") {
     const tokenResult = await authClient.token();
@@ -17,9 +36,10 @@ export async function getAuthToken() {
   }
   const sessionResult = await authClient.getSession();
   if (sessionResult.error) throw sessionResult.error;
-  return sessionResult.data?.session?.token
-    || sessionResult.data?.session?.access_token
-    || sessionResult.data?.session?.accessToken
+  const session = getSessionRecord(sessionResult);
+  return session?.token
+    || session?.access_token
+    || session?.accessToken
     || sessionResult.data?.token
     || null;
 }

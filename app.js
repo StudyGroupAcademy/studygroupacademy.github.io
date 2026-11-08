@@ -1,4 +1,4 @@
-import { authClient, getAuthToken } from "./auth-client.js";
+import { authClient, getAuthToken, getSessionUser, normalizeSessionResult } from "./auth-client.js";
 import { $, $$, db, getErrorMessage, setFormError, showBanner, showToast } from "./core.js";
 import { doc, serverTimestamp, setDoc } from "./firestore-client.js";
 import { cleanNickname, consumeOAuthCallback, describeOAuthError, validNickname } from "./helpers.js";
@@ -219,8 +219,8 @@ function renderAuthState(user, profile = null) {
 async function refreshAuthState({ loadProfile = true } = {}) {
   const result = await authClient.getSession();
   if (result.error) throw result.error;
-  const sessionData = result.data || null;
-  const user = sessionData?.user || null;
+  const sessionData = normalizeSessionResult(result);
+  const user = getSessionUser(result);
   let profile = null;
   if (user && loadProfile) {
     try { profile = await ensureUserProfile(user); }
@@ -236,7 +236,7 @@ $("#auth-sign-out").addEventListener("click", async () => {
     if (result?.error) throw result.error;
     const sessionResult = await authClient.getSession();
     if (sessionResult?.error) throw sessionResult.error;
-    if (sessionResult.data?.user) throw new Error("Your session is still active. Please try logging out again.");
+    if (getSessionUser(sessionResult)) throw new Error("Your session is still active. Please try logging out again.");
     renderAuthState(null);
     showToast("You have been signed out.");
   } catch (error) {

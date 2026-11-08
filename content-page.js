@@ -1,6 +1,6 @@
 import { courses } from "./course-catalog.js";
 import { lessonGuides } from "./lesson-guides.js";
-import { authClient } from "./auth-client.js";
+import { authClient, getSessionUser } from "./auth-client.js";
 import { collection, completeActivity, doc, getDoc, getDocs, limit, query } from "./firestore-client.js";
 import { db } from "./core.js";
 import { earnedNameTag } from "./helpers.js";
@@ -125,7 +125,8 @@ function bindFullLesson() {
     label.textContent = activeIndex === slides.length - 1 ? "Ready to finish" : `Step ${activeIndex + 1} of ${slides.length}`;
     previous.disabled = activeIndex === 0;
     next.hidden = activeIndex === slides.length - 1;
-    next.disabled = Boolean(slides[activeIndex].querySelector(".lesson-self-check")?.dataset.checked !== "true");
+    const activeSelfCheck = slides[activeIndex].querySelector(".lesson-self-check");
+    next.disabled = Boolean(activeSelfCheck && activeSelfCheck.dataset.checked !== "true");
     try {
       localStorage.setItem(stepKey, String(activeIndex));
     } catch (error) {
@@ -195,7 +196,7 @@ function bindFullLesson() {
     try {
       const session = await authClient.getSession();
       if (session.error) throw session.error;
-      if (session.data?.user) {
+      if (getSessionUser(session)) {
         const result = await completeActivity(lesson.dataset.activityId);
         status.textContent = result.awarded
           ? "Lesson complete — 10 XP earned. Your progress is saved to your account."
@@ -271,7 +272,7 @@ function bindWorksheets() {
       try {
         const session = await authClient.getSession();
         if (session.error) throw session.error;
-        if (session.data?.user) {
+        if (getSessionUser(session)) {
           const award = await completeActivity(worksheet.dataset.worksheetId);
           result.textContent = award.awarded
             ? "All answers correct — 10 XP earned. Your progress is saved."
@@ -297,7 +298,7 @@ async function renderSidebarAccount() {
   try {
     const result = await authClient.getSession();
     if (result.error) throw result.error;
-    const user = result.data?.user;
+    const user = getSessionUser(result);
     if (!user) return;
     let name = user.name || user.email?.split("@")[0] || "Learner";
     let handle = name.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 15) || "learner";
@@ -306,7 +307,7 @@ async function renderSidebarAccount() {
       const userId = user.uid || user.id;
       if (!userId) throw new Error("The signed-in account does not include a user ID.");
       const profile = await getDoc(doc(db, "users", userId));
-      const displayName = profile.data()?.displayName;
+      const displayName = profile.data()?.nickname || profile.data()?.displayName;
       if (typeof displayName === "string" && displayName.trim()) name = displayName.trim();
       handle = profile.data()?.handle || handle;
       const progress = await getDocs(query(collection(db, "users", userId, "learningProgress"), limit(100)));
@@ -328,7 +329,7 @@ async function renderSidebarAccount() {
         if (signedOut?.error) throw signedOut.error;
         const sessionResult = await authClient.getSession();
         if (sessionResult?.error) throw sessionResult.error;
-        if (sessionResult.data?.user) throw new Error("Your session is still active. Please try logging out again.");
+        if (getSessionUser(sessionResult)) throw new Error("Your session is still active. Please try logging out again.");
         window.location.assign(new URL("/", window.location.origin).toString());
       } catch (error) {
         console.error("Could not sign out from the subject library.", error);

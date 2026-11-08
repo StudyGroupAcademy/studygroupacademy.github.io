@@ -1,4 +1,4 @@
-import { authClient } from "./auth-client.js";
+import { authClient, getSessionUser } from "./auth-client.js";
 import { collection, completeActivity, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where } from "./firestore-client.js";
 import { $, $$, db, state, showBanner } from "./core.js";
 import { ensureUserProfile, saveDailyGoal, saveProfileChoices, takeWelcomeFlag } from "./session.js";
@@ -37,7 +37,7 @@ export async function initDashboard() {
   try {
     const sessionResult = await authClient.getSession();
     if (sessionResult.error) throw sessionResult.error;
-    const user = sessionResult.data?.user || null;
+    const user = getSessionUser(sessionResult);
     currentUser = user ? { ...user, uid: user.id || user.uid } : null;
   } catch (err) {
     currentUser = null;
@@ -156,7 +156,7 @@ function bindNavigation() {
         if (result?.error) throw result.error;
         const sessionResult = await authClient.getSession();
         if (sessionResult?.error) throw sessionResult.error;
-        if (sessionResult.data?.user) {
+        if (getSessionUser(sessionResult)) {
           throw new Error("Your session is still active. Please try logging out again.");
         }
         state.user = null;
