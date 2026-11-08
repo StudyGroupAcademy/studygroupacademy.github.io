@@ -1011,19 +1011,6 @@ function renderCard() {
   });
 }
 
-
-$("#flip-card")?.addEventListener("click", () => {
-    cardShowingAnswer = !cardShowingAnswer;
-    renderCard();
-  });
-
-  $("#next-card")?.addEventListener("click", () => {
-    cardIndex++;
-    cardShowingAnswer = false;
-    renderCard();
-  });
-}
-
 async function loadSessions() {
   if (!currentUser) return;
   const container = $("#session-list");
