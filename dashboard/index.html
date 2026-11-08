@@ -80,17 +80,6 @@
                 <button class="button button-light" type="button" data-tab="planner">Open your planner <span>→</span></button>
               </aside>
             </div>
-            <div class="overview-grid">
-              <div class="card goal-card">
-                <h3>Today's goal</h3>
-                <div class="goal-bar"><i id="goal-fill"></i></div>
-                <p class="goal-text" id="goal-text">0 of 60 minutes today.</p>
-                <form class="goal-form" id="goal-form"><label>Daily goal in minutes<input name="goal" type="number" min="10" max="600" step="5" value="60" /></label><button class="button button-light" type="submit">Save goal</button></form>
-              </div>
-              <div class="card"><h3>Next exam</h3><div id="overview-exam"></div></div>
-              <div class="card"><h3>Badges</h3><div id="overview-badges"></div></div>
-              <div class="card quote-card"><span>✳</span><p id="quote-text"></p></div>
-            </div>
           </div>
 
           <div class="panel" data-panel="planner" hidden>
@@ -314,10 +303,9 @@
         <p class="resource-empty" id="resource-empty" hidden>No resources match that yet. Try another subject or clear the search.</p>
         <p class="resource-disclaimer">Original StudyGroup learning material. Check your exam board's specification and your teacher's guidance for complete course coverage.</p>
       </section>
-
     </main>
 
-        <footer class="site-footer"><a class="brand footer-brand" href="./"><img src="../assets/wordmark.png" alt="StudyGroup" /></a><span>Built for curious minds, one student at a time.</span><span>Your nickname stays yours <b>✳</b></span></footer>
+    <footer class="site-footer"><a class="brand footer-brand" href="./"><img src="../assets/wordmark.png" alt="StudyGroup" /></a><span>Built for curious minds, one student at a time.</span><span>Your nickname stays yours <b>✳</b></span></footer>
 
     <dialog class="app-dialog" id="profile-dialog" aria-labelledby="profile-title">
       <form class="dialog-form" id="profile-form">
@@ -359,24 +347,8 @@
         <button class="dialog-close" type="button" data-close-dialog aria-label="Close dialog">×</button>
         <span class="eyebrow"><span></span> FLASHCARDS</span>
         <h2 id="study-title">Deck</h2>
-        <div id="study-body">
-          <div class="study-meta"><span id="study-progress">Card 1 of 1</span><label class="study-shuffle"><input id="study-shuffle" type="checkbox" checked /> Shuffle</label></div>
-          <button class="study-card" id="study-card" type="button"><small id="study-face-label">Question</small><span id="study-face-text"></span></button>
-          <div class="study-actions">
-            <button class="button button-dark button-large" type="button" id="study-flip">Show answer</button>
-            <div class="study-grade" id="study-grade" hidden><button class="button button-light button-large" type="button" id="study-again">Still learning</button><button class="button button-dark button-large" type="button" id="study-good">Got it</button></div>
-          </div>
-          <small class="form-hint">Tip: tap the card to flip it. Arrow keys also work.</small>
-        </div>
-        <div class="study-summary" id="study-summary" hidden>
-          <strong>Deck complete</strong>
-          <p id="study-summary-text"></p>
-          <button class="button button-dark button-large" type="button" id="study-restart">Study again</button>
-        </div>
+        <div id="study-body"></div>
       </div>
     </dialog>
-
-    <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <div class="firebase-banner" id="status-banner" role="status">Connecting to your StudyGroup account…</div>
   </body>
 </html>
