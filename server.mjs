@@ -366,25 +366,37 @@ const server = createServer(async (request, response) => {
 
     if (url.pathname === "/api/schools") {
       if (request.method !== "POST") throw new Error("Method not allowed.");
-      if (!identity) throw new Error("Unauthorized.");
-
+      
       const body = await readJson(request);
-      await pool.query(
-        `INSERT INTO school_applications 
-         (school_name, school_domain, website, address, contact_name, contact_email, verification_details) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-          body.schoolName,
-          body.schoolDomain,
-          body.website,
-          body.address,
-          body.contactName,
-          identity.email || body.contactEmail,
-          body.verificationDetails
-        ]
-      );
+      
+      if (!identity && !body.anonymous) {
+        sendJson(response, 401, { error: "Please sign in to continue." }, origin);
+        return;
+      }
 
-      sendJson(response, 200, { ok: true, message: "School application submitted successfully." }, origin);
+      const action = body.action;
+
+      if (action === "submitApplication") {
+        await pool.query(
+          `INSERT INTO school_applications 
+           (school_name, school_domain, website, address, contact_name, contact_email, verification_details) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            body.schoolName,
+            body.schoolDomain,
+            body.website,
+            body.address,
+            body.contactName,
+            identity?.email || body.contactEmail,
+            body.verificationDetails
+          ]
+        );
+
+        sendJson(response, 200, { ok: true, message: "School application submitted successfully." }, origin);
+        return;
+      }
+
+      sendJson(response, 200, { ok: true }, origin);
       return;
     }
 
