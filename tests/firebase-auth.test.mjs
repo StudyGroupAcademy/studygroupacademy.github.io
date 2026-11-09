@@ -15,7 +15,7 @@ test("browser authentication uses the configured Firebase project", () => {
 });
 
 test("Render verifies Firebase ID tokens and keeps legacy identity mappings", () => {
-  assert.match(server, /securetoken\.googleapis\.com/);
+  assert.match(server, /https:\/\/www\.googleapis\.com\/service_accounts\/v1\/jwk\/securetoken@system\.gserviceaccount\.com/);
   assert.match(server, /https:\/\/securetoken\.google\.com\/\$\{firebaseProjectId\}/);
   assert.match(server, /firebase_auth_identities/);
   assert.match(server, /\/api\/identity/);

@@ -4,6 +4,7 @@ import { authClient, getCurrentSession, getSessionUser } from "./auth-client.js"
 import { collection, completeActivity, doc, getDoc, getDocs, limit, query } from "./firestore-client.js";
 import { db } from "./core.js";
 import { earnedNameTag } from "./helpers.js";
+import { mountLearningEnhancements } from "./learning-engine.js";
 
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -63,7 +64,7 @@ function renderWorksheets() {
     <div class="course-note-kicker">STUDYGROUP PRACTICE · ${sheet.questions.length} QUESTIONS</div><h3>${escapeHtml(sheet.title)}</h3>
     <p>Enter an answer for each question and check it straight away. Complete the whole sheet to earn 10 XP.</p>
     <form class="worksheet-player" data-worksheet-id="${escapeHtml(`worksheet-${course.slug}-${sheetIndex + 1}`)}">
-      <ol class="worksheet-questions">${sheet.questions.map((question, questionIndex) => `<li class="worksheet-question" data-worksheet-question="${questionIndex}">
+      <ol class="worksheet-questions">${sheet.questions.map((question, sourceIndex) => ({ question, sourceIndex })).sort(() => Math.random() - 0.5).map(({ question, sourceIndex }, questionIndex) => `<li class="worksheet-question" data-worksheet-question="${questionIndex}" data-question-source="${sourceIndex}">
         <label><span>${escapeHtml(question.prompt)}</span><input type="text" autocomplete="off" maxlength="500" placeholder="Type your answer…" required /></label>
         <button class="worksheet-check-button" type="button" data-check-answer="${questionIndex}">Check answer</button>
         <div class="worksheet-feedback" data-question-feedback="${questionIndex}" role="status" aria-live="polite"></div>
@@ -258,7 +259,21 @@ function bindFullLesson() {
 
 function normalizeAnswer(value) {
   return String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase().replace(/[−–]/g, "-").replace(/[\s.,!?;:'"()\[\]{}]/g, "");
+    .toLowerCase().replace(/[−–]/g, "-").replace(/[£$,]/g, "")
+    .replace(/[\s.,!?;:'"()\[\]{}]/g, "");
+}
+
+function answersMatch(studentAnswer, expectedAnswer) {
+  if (normalizeAnswer(studentAnswer) === normalizeAnswer(expectedAnswer)) return true;
+  const parse = (value) => {
+    const text = String(value || "").trim().replace(/[£$,]/g, "").replace(/%$/, "").replace(/\s/g, "");
+    if (/^-?\d+(?:\.\d+)?$/.test(text)) return Number(text);
+    const fraction = text.match(/^(-?\d+)\/(\d+)$/);
+    if (fraction && Number(fraction[2]) !== 0) return Number(fraction[1]) / Number(fraction[2]);
+    return null;
+  };
+  const a = parse(studentAnswer), b = parse(expectedAnswer);
+  return a !== null && b !== null && Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 1e-8;
 }
 
 function bindWorksheets() {
@@ -279,7 +294,8 @@ function bindWorksheets() {
         const input = question.querySelector("input");
         const feedback = question.querySelector("[data-question-feedback]");
         const sheet = course.worksheets[Number(worksheet.dataset.worksheetId.split("-").at(-1)) - 1];
-        const correctAnswer = sheet.questions[Number(checkButton.dataset.checkAnswer)].answer;
+        const questionData = sheet.questions[Number(question.dataset.questionSource)];
+        const correctAnswer = questionData.answer;
         if (!input.value.trim()) {
           input.focus();
           feedback.textContent = "Enter an answer before checking.";
@@ -287,14 +303,14 @@ function bindWorksheets() {
           return;
         }
         feedback.classList.remove("is-error", "is-correct");
-        if (normalizeAnswer(input.value) === normalizeAnswer(correctAnswer)) {
+        if (answersMatch(input.value, correctAnswer)) {
           question.dataset.correct = "true";
           input.disabled = true;
           checkButton.disabled = true;
-          feedback.innerHTML = `<strong>Correct!</strong> ${escapeHtml(sheet.questions[Number(checkButton.dataset.checkAnswer)].working.join(" "))} Answer: ${escapeHtml(correctAnswer)}`;
+          feedback.innerHTML = `<strong>Correct!</strong> ${escapeHtml(questionData.working.join(" "))} Answer: ${escapeHtml(correctAnswer)}`;
           feedback.classList.add("is-correct");
         } else {
-          feedback.textContent = `Not quite yet. Try again; hint: ${sheet.questions[Number(checkButton.dataset.checkAnswer)].working[0]}`;
+          feedback.textContent = `Not quite yet. Try again; hint: ${questionData.working[0]}`;
           feedback.classList.add("is-error");
         }
         const score = questions.filter((item) => item.dataset.correct === "true").length;
@@ -380,4 +396,8 @@ async function renderSidebarAccount() {
     console.error("Could not load the signed-in account menu for the subject library.", error);
     container.innerHTML = '<a href="/dashboard/">Open my study dashboard</a>';
   }
+}
+
+if (course && ["notes", "worksheets"].includes(pageType)) {
+  void mountLearningEnhancements({ course, lesson: note, pageType, topicSlug });
 }
