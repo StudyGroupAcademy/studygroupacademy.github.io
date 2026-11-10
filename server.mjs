@@ -45,17 +45,7 @@ const allowedOrigins = new Set(
 const allowedOrigin = frontendOrigin;
 const firebaseIssuer = `https://securetoken.google.com/${firebaseProjectId}`;
 const jwks = createRemoteJWKSet(new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"));
-const pool = new Pool({
-  connectionString: databaseUrl,
-  max: Math.min(8, Math.max(2, Number(process.env.PG_POOL_MAX) || 5)),
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 5_000,
-  keepAlive: true,
-  maxLifetimeSeconds: 1_800
-});
-pool.on("error", (error) => {
-  console.error("An idle PostgreSQL connection failed.", error.code || error.message);
-});
+const pool = new Pool({ connectionString: databaseUrl, max: 5 });
 const databaseSchema = await readFile(new URL("./migrations/001_initial.sql", import.meta.url), "utf8");
 await pool.query(databaseSchema);
 await pool.query(`CREATE TABLE IF NOT EXISTS firebase_auth_identities (
@@ -410,20 +400,17 @@ async function dataRequest(uid, body) {
     if (!xpActivityIds.has(activityId)) throw new Error("This learning activity is not recognised.");
     const progressPath = `users/${uid}/learningProgress/${activityId}`;
     const userPath = `users/${uid}`;
-    const client = await pool.connect();
+    const profileRecord = await record(pool, userPath);
+    if (!profileRecord) throw new Error("Your learner profile could not be found. Please refresh and sign in again.");
+    await pool.query("BEGIN");
     try {
-      await client.query("BEGIN");
-      // Serialise XP awards for one learner so simultaneous completions cannot overwrite each other.
-      await client.query("SELECT path FROM app_records WHERE path = $1 FOR UPDATE", [userPath]);
-      const profileRecord = await record(client, userPath);
-      if (!profileRecord) throw new Error("Your learner profile could not be found. Please refresh and sign in again.");
-      const existingProgress = await record(client, progressPath);
+      const existingProgress = await record(pool, progressPath);
       if (existingProgress) {
-        await client.query("COMMIT");
+        await pool.query("COMMIT");
         return { awarded: false, xp: Number(existingProgress.data.xp) || 10 };
       }
       const award = 10;
-      await applyMutation(client, uid, {
+      await applyMutation(pool, uid, {
         op: "set",
         path: progressPath.split("/"),
         data: { completed: true, xp: award, completedAt: new Date().toISOString() }
@@ -432,15 +419,15 @@ async function dataRequest(uid, body) {
         xp: (Number(profileRecord.data.xp) || 0) + award,
         updatedAt: new Date().toISOString()
       });
-      await client.query("UPDATE app_records SET data = $2::jsonb, updated_at = now() WHERE path = $1", [userPath, JSON.stringify(profile)]);
+      await pool.query("UPDATE app_records SET data = $2::jsonb, updated_at = now() WHERE path = $1", [userPath, JSON.stringify(profile)]);
       if (profile.handle) {
         const publicPath = `publicProfiles/${String(profile.handle).toLowerCase()}`;
         const publicProfile = applyFields({}, { uid, handle: String(profile.handle).toLowerCase(), displayName: profile.displayName || profile.nickname || "Learner", nickname: profile.nickname || profile.displayName || "Learner", bio: profile.bio || "", xp: profile.xp, yearGroup: profile.yearGroup || "", boards: profile.boards || {}, createdAt: profile.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() });
-        await client.query(`INSERT INTO app_records (path, owner_id, data, updated_at) VALUES ($1, $2, $3::jsonb, now()) ON CONFLICT (path) DO UPDATE SET data = EXCLUDED.data, updated_at = now() WHERE app_records.owner_id = EXCLUDED.owner_id`, [publicPath, uid, JSON.stringify(publicProfile)]);
+        await pool.query(`INSERT INTO app_records (path, owner_id, data, updated_at) VALUES ($1, $2, $3::jsonb, now()) ON CONFLICT (path) DO UPDATE SET data = EXCLUDED.data, updated_at = now() WHERE app_records.owner_id = EXCLUDED.owner_id`, [publicPath, uid, JSON.stringify(publicProfile)]);
       }
       if (profile.leaderboardOptIn) {
         const publicPath = `publicLeaderboard/${uid}`;
-        const publicRecord = await record(client, publicPath);
+        const publicRecord = await record(pool, publicPath);
         const now = new Date();
         const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
         monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
@@ -463,19 +450,17 @@ async function dataRequest(uid, body) {
           yearKey,
           updatedAt: now.toISOString()
         });
-        await client.query(
+        await pool.query(
           `INSERT INTO app_records (path, owner_id, data, updated_at) VALUES ($1, $2, $3::jsonb, now())
            ON CONFLICT (path) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
           [publicPath, uid, JSON.stringify(publicData)]
         );
       }
-      await client.query("COMMIT");
+      await pool.query("COMMIT");
       return { awarded: true, xp: award, totalXp: profile.xp };
     } catch (error) {
-      await client.query("ROLLBACK");
+      await pool.query("ROLLBACK");
       throw error;
-    } finally {
-      client.release();
     }
   }
   if (body.op === "get") {
@@ -490,16 +475,13 @@ async function dataRequest(uid, body) {
     return { docs: docs.map(({ path, data }) => ({ path: path.split("/"), data })) };
   }
   if (body.op === "set" || body.op === "update" || body.op === "delete") {
-    const client = await pool.connect();
+    await pool.query("BEGIN");
     try {
-      await client.query("BEGIN");
-      await applyMutation(client, uid, body);
-      await client.query("COMMIT");
+      await applyMutation(pool, uid, body);
+      await pool.query("COMMIT");
     } catch (error) {
-      await client.query("ROLLBACK");
+      await pool.query("ROLLBACK");
       throw error;
-    } finally {
-      client.release();
     }
     return { ok: true };
   }
@@ -507,16 +489,13 @@ async function dataRequest(uid, body) {
     if (!Array.isArray(body.changes) || body.changes.length < 1 || body.changes.length > 500) {
       throw new Error("A batch must contain between 1 and 500 changes.");
     }
-    const client = await pool.connect();
+    await pool.query("BEGIN");
     try {
-      await client.query("BEGIN");
-      for (const change of body.changes) await applyMutation(client, uid, change);
-      await client.query("COMMIT");
+      for (const change of body.changes) await applyMutation(pool, uid, change);
+      await pool.query("COMMIT");
     } catch (error) {
-      await client.query("ROLLBACK");
+      await pool.query("ROLLBACK");
       throw error;
-    } finally {
-      client.release();
     }
     return { ok: true };
   }
@@ -536,29 +515,6 @@ function sendJson(response, status, body, origin) {
 function requestOrigin(request) {
   const origin = request.headers.origin;
   return allowedOrigins.has(origin) ? origin : null;
-}
-
-const rateBuckets = new Map();
-let rateSweepCounter = 0;
-function consumeRateLimit(request, identity, pathname) {
-  const policies = {
-    "/api/data": { limit: 180, windowMs: 60_000 },
-    "/api/schools": { limit: 90, windowMs: 60_000 },
-    "/api/cloudinary/signature": { limit: 20, windowMs: 60_000 },
-    "/api/identity": { limit: 60, windowMs: 60_000 }
-  };
-  const policy = policies[pathname] || { limit: 120, windowMs: 60_000 };
-  const actor = identity?.id || request.socket.remoteAddress || "unknown";
-  const key = `${pathname}:${actor}`;
-  const now = Date.now();
-  let bucket = rateBuckets.get(key);
-  if (!bucket || bucket.resetAt <= now) bucket = { count: 0, resetAt: now + policy.windowMs };
-  bucket.count += 1;
-  rateBuckets.set(key, bucket);
-  if (++rateSweepCounter % 500 === 0) {
-    for (const [bucketKey, value] of rateBuckets) if (value.resetAt <= now) rateBuckets.delete(bucketKey);
-  }
-  return bucket.count > policy.limit ? Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)) : 0;
 }
 
 async function authenticatedUser(request) {
@@ -1127,12 +1083,6 @@ const server = createServer(async (request, response) => {
     }
 
     const identity = await authenticatedUser(request);
-    const retryAfter = consumeRateLimit(request, identity, url.pathname);
-    if (retryAfter) {
-      response.setHeader("Retry-After", String(retryAfter));
-      sendJson(response, 429, { error: "Too many requests. Please wait a moment and try again." }, origin);
-      return;
-    }
 
     if (url.pathname === "/api/identity") {
       if (request.method !== "GET") throw new Error("Method not allowed.");

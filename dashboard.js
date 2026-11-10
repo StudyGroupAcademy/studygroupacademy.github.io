@@ -27,39 +27,7 @@ let cardIndex = 0;
 let cardShowingAnswer = false;
 let replyToMessage = null;
 
-
-function bindStudyTools() {
-  const peelFields = ["peel-point", "peel-evidence", "peel-method", "peel-analysis", "peel-link"];
-  const output = $("#peel-output");
-  const buildPeel = () => {
-    if (!output) return "";
-    const values = peelFields.map((id) => String($("#" + id)?.value || "").trim());
-    const [point, evidence, method, analysis, link] = values;
-    const parts = [point, evidence ? `The writer states, “${evidence}”.` : "", method ? `The use of ${method} draws attention to this idea.` : "", analysis, link].filter(Boolean);
-    const text = parts.length ? parts.join(" ") : "Your paragraph plan will appear here.";
-    output.textContent = text;
-    return text;
-  };
-  peelFields.forEach((id) => $("#" + id)?.addEventListener("input", buildPeel));
-  $("#peel-copy")?.addEventListener("click", async () => {
-    const text = buildPeel();
-    if (!text || text === "Your paragraph plan will appear here.") return showBanner("Add at least one PEEL section first.", true);
-    try { await navigator.clipboard.writeText(text); showBanner("Paragraph plan copied."); }
-    catch { showBanner("Copy is unavailable in this browser. Select the paragraph text to copy it.", true); }
-  });
-  $("#build-session-plan")?.addEventListener("click", () => {
-    const subject = $("#session-subject")?.value || "your subject";
-    const minutes = Number($("#session-duration")?.value || 25);
-    const blocks = minutes >= 45
-      ? [["Recall", Math.round(minutes * .2), "Write everything you remember before checking notes."], ["Learn", Math.round(minutes * .35), `Study one ${subject} topic and work through an example.`], ["Practise", Math.round(minutes * .35), "Answer exam-style questions without looking at the solution."], ["Review", minutes - Math.round(minutes * .2) - Math.round(minutes * .35) - Math.round(minutes * .35), "Mark your work and write down one next step."]]
-      : [["Recall", Math.max(3, Math.round(minutes * .2)), "Write down what you already remember."], ["Learn", Math.max(4, Math.round(minutes * .35)), `Review one ${subject} concept and a worked example.`], ["Practise", Math.max(4, minutes - Math.max(3, Math.round(minutes * .2)) - Math.max(4, Math.round(minutes * .35))), "Try a few questions, then check your reasoning."]];
-    const list = $("#study-session-plan");
-    if (list) list.innerHTML = blocks.map(([title, duration, detail]) => `<li><strong>${escapeHtml(title)} · ${duration} min</strong><span>${escapeHTML(detail)}</span></li>`).join("");
-  });
-}
-
 export async function initDashboard() {
-  bindStudyTools();
   bindNavigation();
   bindForms();
   bindProfileDialog();
@@ -1029,7 +997,7 @@ function renderGroupMessages(snapshot) {
     const time = stamp && !Number.isNaN(stamp.getTime()) ? stamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
     const senderMarkup = message.handle ? `<a href="/?${encodeURIComponent(message.handle)}" target="_blank" rel="noopener">${escapeHtml(sender)}</a>` : escapeHtml(sender);
     const quoted = message.replyTo ? `<div class="chat-reply-quote"><strong>${escapeHtml(message.replyTo.name || "Member")}</strong><span>${escapeHtml(message.replyTo.text || "")}</span></div>` : "";
-    return `<article class="chat-message${mine ? " mine" : ""}" data-message-id="${escapeHtml(message.id)}"><div class="chat-message-meta"><strong>${senderMarkup}</strong><time>${escapeHtml(time)}${message.editedAt ? " · edited" : ""}</time></div>${quoted}<p>${escapeHtml(message.text || "")}</p><div class="chat-message-toolbar"><button type="button" class="chat-reply-button" data-message-reply="${escapeHtml(message.id)}" aria-label="Reply to ${escapeHtml(sender)}" title="Reply"><span aria-hidden="true">↖</span></button><details class="chat-message-menu"><summary aria-label="More message actions" title="More actions">···</summary><div class="chat-message-menu-popover">${mine ? `<button type="button" data-message-edit="${escapeHtml(message.id)}">Edit message</button><button type="button" class="is-danger" data-message-delete="${escapeHtml(message.id)}">Delete message</button>` : `<span>Message options</span>`}</div></details></div></article>`;
+    return `<article class="chat-message${mine ? " mine" : ""}" data-message-id="${escapeHtml(message.id)}"><div class="chat-message-meta"><strong>${senderMarkup}</strong><time>${escapeHtml(time)}${message.editedAt ? " · edited" : ""}</time></div>${quoted}<p>${escapeHtml(message.text || "")}</p><div class="chat-message-toolbar"><button type="button" class="chat-reply-button" data-message-reply="${escapeHtml(message.id)}" aria-label="Reply to ${escapeHtml(sender)}">↶ Reply</button><details class="chat-message-menu"><summary aria-label="More message actions" title="More actions">···</summary><div class="chat-message-menu-popover">${mine ? `<button type="button" data-message-edit="${escapeHtml(message.id)}">Edit message</button><button type="button" class="is-danger" data-message-delete="${escapeHtml(message.id)}">Delete message</button>` : `<span>Message options</span>`}</div></details></div></article>`;
   });
 
   if (!messages.length) {
