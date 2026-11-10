@@ -93,7 +93,7 @@ export async function saveProfileChoices(profileData, optIn) {
     profileVisibility: profileData.profileVisibility === "private" ? "private" : "public",
     leaderboardOptIn: optIn,
     onboardingComplete: true,
-    onboardingVersion: 2,
+    onboardingVersion: 3,
     updatedAt: new Date().toISOString()
   };
 

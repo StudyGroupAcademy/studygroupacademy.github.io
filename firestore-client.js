@@ -178,9 +178,21 @@ export async function addDoc(ref, data) {
   return newRef;
 }
 
+function snapshotFingerprint(result) {
+  const normalise = (value) => {
+    if (value == null || typeof value !== "object") return value;
+    if (typeof value.toDate === "function") return { __timestamp: value.toDate().toISOString() };
+    if (Array.isArray(value)) return value.map(normalise);
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, normalise(item)]));
+  };
+  if (Array.isArray(result?.docs)) return JSON.stringify(result.docs.map((entry) => ({ id: entry.id, data: normalise(entry.data()) })));
+  return JSON.stringify({ exists: result?.exists?.() ?? false, data: normalise(result?.data?.()) });
+}
+
 export function onSnapshot(ref, next, error = () => {}) {
   let active = true;
   let running = false;
+  let previousFingerprint = null;
   const poll = async () => {
     if (!active || running) return;
     running = true;
@@ -188,7 +200,15 @@ export function onSnapshot(ref, next, error = () => {}) {
       const result = ref.kind === "collection" || ref.constraints
         ? await getDocs(ref)
         : await getDoc(ref);
-      if (active) next(result);
+      if (!active) return;
+      const fingerprint = snapshotFingerprint(result);
+      // The REST-backed listener checks for changes in the background. Do not
+      // redraw the UI when the data is identical: this prevents chat flicker,
+      // scroll jumps and inputs losing focus on every polling interval.
+      if (fingerprint !== previousFingerprint) {
+        previousFingerprint = fingerprint;
+        next(result);
+      }
     } catch (caught) {
       if (active) error(caught);
     } finally {

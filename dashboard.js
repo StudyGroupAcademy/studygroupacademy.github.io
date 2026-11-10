@@ -65,7 +65,7 @@ export async function initDashboard() {
   // Show the current onboarding experience to existing accounts that have not completed this version.
   // This also covers users whose old profile predates the onboarding welcome flag.
   const onboardingVersion = Number(state.profile?.onboardingVersion || 0);
-  if (welcomePending || welcomeFromProfile || onboardingVersion < 2) openProfileDialog(true);
+  if (welcomePending || welcomeFromProfile || onboardingVersion < 3) openProfileDialog(true);
 }
 
 async function handleSignedInUser(user) {
@@ -417,6 +417,15 @@ function bindProfileDialog() {
     closeBtn.addEventListener("click", () => dialog.close());
   }
 
+  const bioInput = form.elements["bio"];
+  if (bioInput && !bioInput.dataset.counterReady) {
+    const counter = form.querySelector(".bio-counter");
+    const updateBioCounter = () => { if (counter) counter.textContent = `${bioInput.value.length}/240 characters`; };
+    bioInput.addEventListener("input", updateBioCounter);
+    updateBioCounter();
+    bioInput.dataset.counterReady = "true";
+  }
+
   const linkGoogleBtn = $("#link-google");
   if (linkGoogleBtn) {
     linkGoogleBtn.addEventListener("click", async () => {
@@ -444,33 +453,75 @@ function bindProfileDialog() {
   const boardOptions = ["AQA", "Edexcel", "Pearson Edexcel", "OCR", "WJEC", "Eduqas", "CCEA", "Other", "Not sure yet"];
   const onboardingSubjects = ["Maths", "English Language", "English Literature", "Biology", "Chemistry", "Physics", "Combined Science", "Computer Science", "History", "Geography", "French", "Spanish"];
   if (boardGrid && !boardGrid.dataset.ready) {
-    boardGrid.innerHTML = onboardingSubjects.map((subject) => `<label>${subject}<select name="board:${subject}"><option value="">Choose exam board</option>${boardOptions.map((board) => `<option value="${board}">${board}</option>`).join("")}</select></label>`).join("");
+    boardGrid.innerHTML = onboardingSubjects.map((subject) => `<div class="subject-board-card"><label class="subject-choice"><input type="checkbox" name="subjects" value="${subject}"><span>${subject}</span></label><label class="subject-board-label">Exam board<select name="board:${subject}" disabled><option value="">Choose board</option>${boardOptions.map((board) => `<option value="${board}">${board}</option>`).join("")}</select></label></div>`).join("");
     boardGrid.dataset.ready = "true";
+    boardGrid.addEventListener("change", (event) => {
+      if (!event.target.matches('input[name="subjects"]')) return;
+      const card = event.target.closest(".subject-board-card");
+      const select = card?.querySelector("select");
+      if (select) { select.disabled = !event.target.checked; if (!event.target.checked) select.value = ""; }
+    });
   }
 
   if (!form.dataset.wizardReady) {
-    const slides = document.createElement("div"); slides.className = "onboarding-slides";
+    const slides = document.createElement("div");
+    slides.className = "onboarding-slides";
     const definitions = [
-      { title: "Your profile", selectors: [".profile-intro-grid", 'label:has([name="nickname"])', 'label:has([name="displayName"])', 'label:has([name="handle"])', 'label:has([name="bio"])', ".profile-customisation-grid"] },
-      { title: "Your subjects", selectors: [".onboarding-section"] },
-      { title: "Your study preferences", selectors: [".opt-in-field", "#link-google", "#link-google + .form-hint"] }
+      { title: "First, your name", eyebrow: "YOUR IDENTITY", description: "Choose how you want to appear around StudyGroup.", selectors: [".profile-intro-grid", 'label:has([name="nickname"])', 'label:has([name="displayName"])'] },
+      { title: "Choose your username", eyebrow: "YOUR UNIQUE HANDLE", description: "This is your unique @name and the link people can use to find your profile.", selectors: ['label:has([name="handle"])'] },
+      { title: "A little about you", eyebrow: "YOUR PROFILE & PRIVACY", description: "Tell people what you're learning and decide what you want to share.", selectors: ['label:has([name="bio"])', ".profile-customisation-grid", ".opt-in-field", "#link-google", "#link-google + .form-hint"] },
+      { title: "Set your study context", eyebrow: "YOUR LEARNING ROUTINE", description: "We'll use these choices to make your study space more relevant.", selectors: [".onboarding-preferences"] },
+      { title: "Choose your subjects", eyebrow: "YOUR CURRICULUM", description: "Pick the subjects you're studying. You can change these whenever you need.", selectors: [".onboarding-section"] }
     ];
     definitions.forEach((definition, index) => {
-      const slide = document.createElement("section"); slide.className = "onboarding-step"; slide.dataset.onboardingStep = String(index); slide.hidden = index !== 0;
-      slide.innerHTML = `<div class="onboarding-step-heading"><span>STEP 0${index + 1} / 03</span><h3>${definition.title}</h3></div>`;
-      for (const selector of definition.selectors) { const node = form.querySelector(selector); if (node && !node.closest(".onboarding-slides")) slide.append(node); }
+      const slide = document.createElement("section");
+      slide.className = "onboarding-step";
+      slide.dataset.onboardingStep = String(index);
+      slide.hidden = index !== 0;
+      slide.innerHTML = `<div class="onboarding-step-heading"><span>STEP 0${index + 1} / 05 · ${definition.eyebrow}</span><h3>${definition.title}</h3><p>${definition.description}</p></div>`;
+      for (const selector of definition.selectors) {
+        const node = form.querySelector(selector);
+        if (node && !node.closest(".onboarding-slides")) slide.append(node);
+      }
       slides.append(slide);
     });
-    const actions = form.querySelector(".onboarding-actions"); form.insertBefore(slides, actions);
-    const back = document.createElement("button"); back.type = "button"; back.className = "button button-light"; back.textContent = "← Back"; back.dataset.onboardingBack = ""; back.hidden = true;
-    const next = document.createElement("button"); next.type = "button"; next.className = "button button-dark"; next.textContent = "Continue →"; next.dataset.onboardingNext = "";
-    actions.insertBefore(back, actions.querySelector("#skip-onboarding")); actions.insertBefore(next, actions.querySelector(".dialog-submit"));
+    const actions = form.querySelector(".onboarding-actions");
+    if (!actions) return;
+    form.insertBefore(slides, actions);
+    const back = document.createElement("button");
+    back.type = "button"; back.className = "button button-light"; back.textContent = "← Back"; back.dataset.onboardingBack = ""; back.hidden = true;
+    const next = document.createElement("button");
+    next.type = "button"; next.className = "button button-dark"; next.textContent = "Continue →"; next.dataset.onboardingNext = "";
+    actions.insertBefore(back, actions.querySelector("#skip-onboarding"));
+    actions.insertBefore(next, actions.querySelector(".dialog-submit"));
+    const progress = document.createElement("div");
+    progress.className = "onboarding-progress";
+    progress.innerHTML = "<span></span>";
+    form.insertBefore(progress, slides);
     let active = 0;
-    const updateStep = () => { slides.querySelectorAll(".onboarding-step").forEach((slide, index) => { slide.hidden = index !== active; slide.classList.toggle("is-active", index === active); }); back.hidden = active === 0; next.hidden = active === 2; actions.querySelector(".dialog-submit").hidden = active !== 2; progress.style.setProperty("--step-progress", `${(active + 1) / 3 * 100}%`); };
+    const updateStep = () => {
+      slides.querySelectorAll(".onboarding-step").forEach((slide, index) => {
+        slide.hidden = index !== active;
+        slide.classList.toggle("is-active", index === active);
+      });
+      back.hidden = active === 0;
+      next.hidden = active === definitions.length - 1;
+      actions.querySelector(".dialog-submit").hidden = active !== definitions.length - 1;
+      progress.style.setProperty("--step-progress", `${(active + 1) / definitions.length * 100}%`);
+      const stepLabel = form.querySelector("#profile-step-count");
+      if (stepLabel) stepLabel.textContent = `Step ${active + 1} of ${definitions.length}`;
+    };
     back.addEventListener("click", () => { active = Math.max(0, active - 1); updateStep(); });
-    next.addEventListener("click", () => { const required = slides.querySelectorAll(`.onboarding-step[data-onboarding-step="${active}"] input[required], .onboarding-step[data-onboarding-step="${active}"] select[required]`); for (const field of required) if (!field.reportValidity()) return; active = Math.min(2, active + 1); updateStep(); });
-    const progress = document.createElement("div"); progress.className = "onboarding-progress"; progress.innerHTML = "<span></span>"; form.insertBefore(progress, slides);
-    form.dataset.wizardReady = "true"; form.__updateWizard = updateStep; form.__resetWizard = () => { active = 0; updateStep(); }; updateStep();
+    next.addEventListener("click", () => {
+      const required = slides.querySelectorAll(`.onboarding-step[data-onboarding-step="${active}"] input[required], .onboarding-step[data-onboarding-step="${active}"] select[required]`);
+      for (const field of required) if (!field.reportValidity()) return;
+      active = Math.min(definitions.length - 1, active + 1);
+      updateStep();
+    });
+    form.dataset.wizardReady = "true";
+    form.__updateWizard = updateStep;
+    form.__resetWizard = () => { active = 0; updateStep(); };
+    updateStep();
   }
 
   const skipButton = $("#skip-onboarding");
@@ -483,8 +534,9 @@ function bindProfileDialog() {
     const error = $("#profile-error");
     try {
       skipButton.disabled = true;
-      const boards = Object.fromEntries(onboardingSubjects.map((subject) => [subject, String(data.get(`board:${subject}`) || "")]).filter(([, value]) => value));
-      await saveProfileChoices({ nickname, displayName, handle, bio: String(data.get("bio") || ""), boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "", profileAccent: data.get("profileAccent") || "sage", profileVisibility: data.get("profileVisibility") || "public" }, data.get("leaderboardOptIn") === "on");
+      const selectedSubjects = data.getAll("subjects").map(String);
+      const boards = Object.fromEntries(selectedSubjects.map((subject) => [subject, String(data.get(`board:${subject}`) || "")]).filter(([, value]) => value));
+      await saveProfileChoices({ nickname, displayName, handle, bio: String(data.get("bio") || ""), boards, selectedSubjects, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "", profileAccent: data.get("profileAccent") || "sage", profileVisibility: data.get("profileVisibility") || "public" }, data.get("leaderboardOptIn") === "on");
       dialog.close();
       await handleSignedInUser(currentUser);
     } catch (err) {
@@ -501,12 +553,13 @@ function bindProfileDialog() {
     const handle = data.get("handle").trim().toLowerCase();
     const bio = data.get("bio").trim();
     const optIn = data.get("leaderboardOptIn") === "on";
-    const boards = Object.fromEntries(onboardingSubjects.map((subject) => [subject, String(data.get(`board:${subject}`) || "")]).filter(([, value]) => value));
+    const selectedSubjects = data.getAll("subjects").map(String);
+    const boards = Object.fromEntries(selectedSubjects.map((subject) => [subject, String(data.get(`board:${subject}`) || "")]).filter(([, value]) => value));
 
     const errBox = $("#profile-error");
     try {
       if (errBox) errBox.hidden = true;
-      await saveProfileChoices({ nickname, displayName, handle, bio, boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "", profileAccent: data.get("profileAccent") || "sage", profileVisibility: data.get("profileVisibility") || "public" }, optIn);
+      await saveProfileChoices({ nickname, displayName, handle, bio, boards, selectedSubjects, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "", profileAccent: data.get("profileAccent") || "sage", profileVisibility: data.get("profileVisibility") || "public" }, optIn);
       dialog.close();
       const snapshot = await getDoc(doc(db, "users", currentUser.uid));
       if (snapshot.exists()) {
@@ -551,10 +604,21 @@ async function openProfileDialog(isWelcome) {
       if (form.elements["profileAccent"]) form.elements["profileAccent"].value = data.profileAccent || "sage";
       if (form.elements["profileVisibility"]) form.elements["profileVisibility"].value = data.profileVisibility || "public";
       if (form.elements["leaderboardOptIn"]) form.elements["leaderboardOptIn"].checked = Boolean(data.leaderboardOptIn);
+      const savedSubjects = Array.isArray(data.selectedSubjects) && data.selectedSubjects.length
+        ? data.selectedSubjects : Object.keys(data.boards || {});
+      for (const subject of savedSubjects) {
+        const checkbox = form.querySelector(`[name="subjects"][value="${CSS.escape(subject)}"]`);
+        if (checkbox) checkbox.checked = true;
+      }
       for (const [subject, board] of Object.entries(data.boards || {})) {
         const field = form.elements[`board:${subject}`];
         if (field) field.value = board;
       }
+      form.querySelectorAll('.subject-board-card').forEach((card) => {
+        const checkbox = card.querySelector('input[name="subjects"]');
+        const select = card.querySelector('select');
+        if (select) select.disabled = !checkbox?.checked;
+      });
       for (const field of ["yearGroup", "preferredStudyTime", "studyStartTime", "dailyGoal", "nextExamDate"]) {
         if (form.elements[field]) form.elements[field].value = data[field] || "";
       }
@@ -926,7 +990,7 @@ function renderGroupMessages(snapshot) {
   if (!box) return;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 100;
   const messages = snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
-  box.innerHTML = messages.length ? messages.map((message) => {
+  const markup = messages.map((message) => {
     const mine = message.uid === currentUser?.uid;
     const sender = message.name || "StudyGroup member";
     const stamp = message.createdAt?.toDate ? message.createdAt.toDate() : message.createdAt ? new Date(message.createdAt) : null;
@@ -934,7 +998,30 @@ function renderGroupMessages(snapshot) {
     const senderMarkup = message.handle ? `<a href="/?${encodeURIComponent(message.handle)}" target="_blank" rel="noopener">${escapeHtml(sender)}</a>` : escapeHtml(sender);
     const quoted = message.replyTo ? `<div class="chat-reply-quote"><strong>${escapeHtml(message.replyTo.name || "Member")}</strong><span>${escapeHtml(message.replyTo.text || "")}</span></div>` : "";
     return `<article class="chat-message${mine ? " mine" : ""}" data-message-id="${escapeHtml(message.id)}"><div class="chat-message-meta"><strong>${senderMarkup}</strong><time>${escapeHtml(time)}${message.editedAt ? " · edited" : ""}</time></div>${quoted}<p>${escapeHtml(message.text || "")}</p><div class="chat-message-toolbar"><button type="button" class="chat-reply-button" data-message-reply="${escapeHtml(message.id)}" aria-label="Reply to ${escapeHtml(sender)}">↶ Reply</button><details class="chat-message-menu"><summary aria-label="More message actions" title="More actions">···</summary><div class="chat-message-menu-popover">${mine ? `<button type="button" data-message-edit="${escapeHtml(message.id)}">Edit message</button><button type="button" class="is-danger" data-message-delete="${escapeHtml(message.id)}">Delete message</button>` : `<span>Message options</span>`}</div></details></div></article>`;
-  }).join("") : `<div class="chat-empty-state"><span class="chat-empty-icon">✦</span><strong>Start the conversation</strong><p>Send the first message to your study group.</p></div>`;
+  });
+
+  if (!messages.length) {
+    const emptyMarkup = `<div class="chat-empty-state"><span class="chat-empty-icon">✦</span><strong>Start the conversation</strong><p>Send the first message to your study group.</p></div>`;
+    if (box.innerHTML !== emptyMarkup) box.innerHTML = emptyMarkup;
+  } else {
+    const desired = document.createElement("div");
+    desired.innerHTML = markup.join("");
+    const wanted = [...desired.children];
+    const existing = new Map([...box.querySelectorAll(".chat-message[data-message-id]")].map((node) => [node.dataset.messageId, node]));
+    let cursor = box.firstElementChild;
+    for (const fresh of wanted) {
+      const current = existing.get(fresh.dataset.messageId);
+      const node = current || fresh;
+      if (current && current.outerHTML !== fresh.outerHTML) current.replaceWith(fresh);
+      const finalNode = current && current.outerHTML === fresh.outerHTML ? current : fresh;
+      if (finalNode !== cursor) box.insertBefore(finalNode, cursor);
+      cursor = finalNode.nextElementSibling;
+      existing.delete(fresh.dataset.messageId);
+    }
+    for (const stale of existing.values()) stale.remove();
+    // Remove the initial loading placeholder once the first real snapshot arrives.
+    box.querySelectorAll(":scope > :not(.chat-message)").forEach((node) => node.remove());
+  }
   if (nearBottom || box.dataset.firstRender === "true") box.scrollTop = box.scrollHeight;
   box.dataset.firstRender = "false";
 }

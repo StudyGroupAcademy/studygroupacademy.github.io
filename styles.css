@@ -1617,3 +1617,37 @@ body { font-size: 16px; line-height: 1.55; }
 @media(prefers-reduced-motion:reduce){.new-benefit-card,.new-library-card{transition:none}.new-benefit-card:hover,.new-library-card:hover{transform:none}}
 
 .account-danger-zone{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:8px 0 18px;border:1px solid #efd8d1;border-radius:9px;padding:15px;background:#fff8f5}.account-danger-zone strong{color:#8e3f31;font-size:11px}.account-danger-zone p{max-width:340px;margin:5px 0 0;color:#8b746d;font-size:9px;line-height:1.6}.account-delete-trigger,.account-delete-confirm{background:#a43f32;color:#fff}.account-delete-trigger:hover,.account-delete-confirm:hover{background:#842f25}.account-delete-confirm:disabled{opacity:.45;cursor:not-allowed;transform:none}.delete-account-dialog .dialog-form{max-width:480px}.delete-eyebrow{color:#a43f32}.delete-warning{display:grid;gap:5px;margin:15px 0;border:1px solid #e8b9ad;border-radius:8px;padding:13px;background:#fff4f0;color:#81392e}.delete-warning strong{font-size:11px}.delete-warning span{font-size:9px;line-height:1.6}.delete-account-dialog .dialog-form>button[type=submit]{width:100%;margin:8px 0}.delete-account-dialog .dialog-form>button[data-close-delete-account]{width:100%}.delete-account-dialog .dialog-form label strong{color:#a43f32}.delete-account-dialog .auth-error{margin:10px 0}
+
+
+/* Refined multi-step onboarding */
+#profile-dialog.is-onboarding .dialog-form{width:min(100%,900px);gap:20px;padding:clamp(24px,5vw,68px)}
+#profile-dialog.is-onboarding .dialog-intro{font-size:16px;line-height:1.7;color:#777b72;max-width:650px}
+#profile-dialog.is-onboarding .onboarding-progress{height:6px;margin:10px 0 8px;background:#e7e9e1}
+#profile-dialog.is-onboarding .onboarding-progress:before{background:linear-gradient(90deg,#557c5d,#86a987)}
+#profile-dialog.is-onboarding .onboarding-step{min-height:360px;max-width:760px;width:100%;padding:4px 0 18px}
+#profile-dialog.is-onboarding .onboarding-step-heading{margin-bottom:26px}
+#profile-dialog.is-onboarding .onboarding-step-heading span{display:block;font-size:10px;letter-spacing:.13em;color:#68836a;font-weight:850}
+#profile-dialog.is-onboarding .onboarding-step-heading h3{font-size:clamp(28px,4vw,38px);margin:8px 0 6px;color:#20251f}
+#profile-dialog.is-onboarding .onboarding-step-heading p{margin:0;color:#777b72;font-size:14px;line-height:1.65}
+#profile-dialog.is-onboarding .onboarding-step>label:not(.opt-in-field){display:grid;gap:9px;margin:18px 0;color:#343a33;font-size:13px;font-weight:750}
+#profile-dialog.is-onboarding input:not([type=checkbox]),#profile-dialog.is-onboarding textarea,#profile-dialog.is-onboarding select{width:100%;min-height:54px;border:1px solid #dfe4da;border-radius:13px;padding:14px 16px;background:#fff;color:#252c25;font:500 15px/1.5 inherit;box-shadow:0 2px 8px #1d2b1806;transition:border-color .18s,box-shadow .18s,background .18s}
+#profile-dialog.is-onboarding textarea{min-height:170px;resize:vertical;line-height:1.7}
+#profile-dialog.is-onboarding input:focus,#profile-dialog.is-onboarding textarea:focus,#profile-dialog.is-onboarding select:focus{outline:none;border-color:#83a184;box-shadow:0 0 0 4px #6d956b20;background:#fff}
+#profile-dialog.is-onboarding .bio-field{gap:8px}
+#profile-dialog.is-onboarding .field-description,#profile-dialog.is-onboarding .bio-counter{font-size:12px;font-weight:450;color:#858a80;line-height:1.55}
+#profile-dialog.is-onboarding .profile-customisation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:18px 0}
+#profile-dialog.is-onboarding .profile-customisation-grid label,#profile-dialog.is-onboarding .onboarding-preferences label{display:grid;gap:8px;color:#343a33;font-size:12px;font-weight:750}
+#profile-dialog.is-onboarding .opt-in-field{display:flex;align-items:flex-start;gap:12px;padding:16px;border:1px solid #e3e8df;border-radius:14px;background:#fff}
+#profile-dialog.is-onboarding .opt-in-field input{width:18px;height:18px;min-height:18px;margin-top:2px;accent-color:#557c5d}
+#profile-dialog.is-onboarding .onboarding-section{display:grid;gap:18px}
+#profile-dialog.is-onboarding .signup-board-grid{grid-template-columns:repeat(2,minmax(0,1fr));max-height:48vh;overflow:auto;padding:2px 6px 4px 2px}
+#profile-dialog.is-onboarding .subject-board-card{display:grid;gap:12px;padding:15px;border:1px solid #e5e9e1;border-radius:14px;background:#fff;box-shadow:0 3px 12px #26351d07}
+#profile-dialog.is-onboarding .subject-choice{display:flex;align-items:center;gap:10px;color:#303a30;font-size:14px;font-weight:750;cursor:pointer}
+#profile-dialog.is-onboarding .subject-choice input{width:18px;height:18px;min-height:18px;margin:0;accent-color:#587d5e}
+#profile-dialog.is-onboarding .subject-board-label{display:grid;gap:6px;color:#83877e;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
+#profile-dialog.is-onboarding .subject-board-label select{min-height:42px;padding:9px 11px;font-size:12px}
+#profile-dialog.is-onboarding .subject-board-label select:disabled{opacity:.45;background:#f4f5f1;cursor:not-allowed}
+#profile-dialog.is-onboarding .onboarding-actions{padding-top:16px;gap:12px}
+#profile-dialog.is-onboarding .onboarding-actions .button{min-height:48px;border-radius:12px;padding:0 20px}
+#profile-dialog.is-onboarding .onboarding-actions .dialog-submit{margin-left:auto}
+@media(max-width:600px){#profile-dialog.is-onboarding .dialog-form{padding:70px 20px 22px;justify-content:flex-start}#profile-dialog.is-onboarding .signup-board-grid{grid-template-columns:1fr;max-height:none}#profile-dialog.is-onboarding .profile-customisation-grid,#profile-dialog.is-onboarding .onboarding-preferences{grid-template-columns:1fr}#profile-dialog.is-onboarding .onboarding-step{min-height:0}}
