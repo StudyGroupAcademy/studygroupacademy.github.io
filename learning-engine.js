@@ -1,5 +1,5 @@
 import { getCurrentSession, getSessionUser } from "./auth-client.js";
-import { doc, getDoc, updateDoc } from "./firestore-client.js";
+import { collection, doc, getDoc, getDocs, limit, query, setDoc, updateDoc } from "./firestore-client.js";
 import { db } from "./core.js";
 import { closeNumber, generateMathQuestion, parseLinearExpression, shuffle } from "./question-generator.js";
 import { playSound } from "./sound-effects.js";
@@ -61,17 +61,53 @@ async function loadProfile() {
 
 function renderFlashcards(course, lesson) {
   const cards = makeCards(course,lesson);
-  return `<section class="sg-flashcards" aria-label="Lesson flashcards"><div class="sg-section-heading"><div><span class="sg-eyebrow">ACTIVE RECALL</span><h2>Flashcards · ${cards.length} cards</h2><p>Try to recall the answer before revealing it.</p></div><button type="button" class="sg-secondary-button" data-card-shuffle>Shuffle</button></div><div class="sg-card" data-sg-card tabindex="0" role="button" aria-label="Flashcard. Activate to reveal answer"><span class="sg-card-count" data-card-count>Card 1 of ${cards.length}</span><span class="sg-card-side" data-card-side>QUESTION</span><strong data-card-text>${esc(cards[0].front)}</strong><span class="sg-card-hint" data-card-hint>Tap or press Enter to reveal</span></div><div class="sg-card-controls"><button type="button" data-card-prev>← Previous</button><button type="button" data-card-flip>Reveal answer</button><button type="button" data-card-next>Next →</button></div><div class="sg-card-rating" hidden data-card-rating><span>Did you know it?</span><button type="button" data-card-known="yes">I knew it</button><button type="button" data-card-known="no">Need to review</button></div><p class="sg-card-progress" data-card-progress>0 known · ${cards.length} to review</p></section>`;
+  return `<section class="sg-flashcards" aria-label="Lesson flashcards"><div class="sg-section-heading"><div><span class="sg-eyebrow">ACTIVE RECALL</span><h2>Flashcards · ${cards.length} cards</h2><p>Try to recall the answer before revealing it.</p></div><button type="button" class="sg-secondary-button" data-card-shuffle>Shuffle</button></div><div class="sg-card" data-sg-card tabindex="0" role="button" aria-label="Flashcard. Activate to reveal answer"><span class="sg-card-count" data-card-count>Card 1 of ${cards.length}</span><span class="sg-card-side" data-card-side>QUESTION</span><strong data-card-text>${esc(cards[0].front)}</strong><span class="sg-card-hint" data-card-hint>Tap or press Enter to reveal</span></div><div class="sg-card-controls"><button type="button" data-card-prev>← Previous</button><button type="button" data-card-flip>Reveal answer</button><button type="button" data-card-next>Next →</button></div><div class="sg-card-rating" hidden data-card-rating><span>Did you know it?</span><button type="button" data-card-known="yes">I knew it</button><button type="button" data-card-known="no">Need to review</button></div><p class="sg-card-progress" data-card-progress>0 known · ${cards.length} to review</p><p class="sg-review-insight" data-review-insight aria-live="polite">Your review schedule will appear here.</p></section>`;
 }
 
 function renderGenerator() {
   return `<section class="sg-generator"><div class="sg-section-heading"><div><span class="sg-eyebrow">PROCEDURAL PRACTICE</span><h2>Fresh practice, every time</h2><p>New values and contexts are generated when you create a worksheet. Each question carries its own answer and worked solution.</p></div><span class="sg-random-mark">↻</span></div><div class="sg-generator-controls"><label>Tier<select data-sg-tier><option>Foundation</option><option>Higher</option></select></label><label>Questions<select data-sg-count><option>8</option><option selected>12</option><option>16</option><option>20</option></select></label><button type="button" class="sg-primary-button" data-sg-generate>Generate new worksheet</button></div><div class="sg-generated-meta" data-sg-meta aria-live="polite">No worksheet generated yet.</div><ol class="sg-generated-questions" data-sg-questions></ol><div class="sg-generated-score" data-sg-score hidden></div></section>`;
 }
 
-function initFlashcards(root) {
+function reviewKey(text) {
+  let hash = 2166136261;
+  for (const character of String(text)) { hash ^= character.charCodeAt(0); hash = Math.imul(hash, 16777619); }
+  return `card-${(hash >>> 0).toString(36)}`;
+}
+
+async function initFlashcards(root, userId, course, lesson) {
   const section = root.querySelector(".sg-flashcards"); if (!section) return;
-  const cards = makeCards(window.__sgCourse, window.__sgLesson);
-  let order = cards.map((_,i)=>i), index=0, revealed=false, known=new Set(), missed=new Set();
+  const cards = makeCards(course, lesson);
+  const reviewRecords = new Map();
+  if (userId) {
+    try {
+      const snapshot = await getDocs(query(collection(db, "users", userId, "learningReviews"), limit(250)));
+      snapshot.docs.forEach((entry) => {
+        const data = entry.data();
+        if (data.course === course.slug && data.topic === lesson.title) reviewRecords.set(entry.id, data);
+      });
+    } catch (error) { console.warn("Could not load spaced-repetition history.", error); }
+  } else {
+    for (const card of cards) {
+      const key = reviewKey(card.front);
+      try {
+        const saved = localStorage.getItem(`sg-review:${key}`);
+        if (saved) {
+          const data = JSON.parse(saved);
+          if (data.course === course.slug && data.topic === lesson.title) reviewRecords.set(key, data);
+        }
+      } catch {}
+    }
+  }
+  const now = Date.now();
+  let order = cards.map((_, i) => i).sort((a, b) => {
+    const first = reviewRecords.get(reviewKey(cards[a].front));
+    const second = reviewRecords.get(reviewKey(cards[b].front));
+    const firstDue = first?.nextReviewAt ? new Date(first.nextReviewAt).getTime() : 0;
+    const secondDue = second?.nextReviewAt ? new Date(second.nextReviewAt).getTime() : 0;
+    const firstRank = !first ? 1 : firstDue <= now ? 0 : 2;
+    const secondRank = !second ? 1 : secondDue <= now ? 0 : 2;
+    return firstRank - secondRank || firstDue - secondDue;
+  }), index=0, revealed=false, known=new Set(), missed=new Set();
   const card=section.querySelector("[data-sg-card]"), text=section.querySelector("[data-card-text]"), side=section.querySelector("[data-card-side]"), hint=section.querySelector("[data-card-hint]"), rating=section.querySelector("[data-card-rating]");
   const show=()=>{const c=cards[order[index]]; text.textContent=revealed?c.back:c.front; side.textContent=revealed?"ANSWER":"QUESTION"; hint.textContent=revealed?"Mark your confidence below":"Tap or press Enter to reveal"; section.querySelector("[data-card-count]").textContent=`Card ${index+1} of ${cards.length}`; rating.hidden=!revealed; section.querySelector("[data-card-progress]").textContent=`${known.size} known · ${missed.size} marked to review · ${cards.length-known.size} not yet known`;};
   const flip=()=>{revealed=!revealed;playSound("flip");show();};
@@ -80,7 +116,40 @@ function initFlashcards(root) {
   section.querySelector("[data-card-prev]").addEventListener("click",()=>{index=(index-1+cards.length)%cards.length;revealed=false;show();});
   section.querySelector("[data-card-next]").addEventListener("click",()=>{index=(index+1)%cards.length;revealed=false;show();});
   section.querySelector("[data-card-shuffle]").addEventListener("click",()=>{order=shuffle(order);index=0;revealed=false;show();});
-  rating.addEventListener("click",e=>{const btn=e.target.closest("[data-card-known]");if(!btn)return;const id=order[index];if(btn.dataset.cardKnown==="yes"){known.add(id);missed.delete(id);}else{missed.add(id);known.delete(id);}index=(index+1)%cards.length;revealed=false;show();});
+  rating.addEventListener("click", async e => {
+    const btn = e.target.closest("[data-card-known]"); if (!btn) return;
+    const cardIndex = order[index];
+    const currentCard = cards[cardIndex];
+    const key = reviewKey(currentCard.front);
+    const previous = reviewRecords.get(key) || {};
+    const recalled = btn.dataset.cardKnown === "yes";
+    if (recalled) { known.add(cardIndex); missed.delete(cardIndex); }
+    else { missed.add(cardIndex); known.delete(cardIndex); }
+    const repetitions = recalled ? (Number(previous.repetitions) || 0) + 1 : 0;
+    const previousInterval = Number(previous.intervalDays) || 0;
+    const intervalDays = recalled ? (repetitions === 1 ? 1 : repetitions === 2 ? 3 : Math.min(30, Math.max(1, previousInterval * 2))) : 1;
+    const reviewedAt = new Date();
+    const nextReviewAt = new Date(reviewedAt.getTime() + intervalDays * 86_400_000).toISOString();
+    const record = { cardFront: currentCard.front, cardBack: currentCard.back, course: course.slug, topic: lesson.title, repetitions, intervalDays, nextReviewAt, lastReviewedAt: reviewedAt.toISOString(), lastResult: recalled ? "remembered" : "review-again", mastery: Math.min(100, Math.round(repetitions / 5 * 100)) };
+    reviewRecords.set(key, record);
+    const dueCount = [...reviewRecords.values()].filter(item => item.nextReviewAt && new Date(item.nextReviewAt).getTime() <= Date.now()).length;
+    const insight = section.querySelector("[data-review-insight]");
+    const secureCount = [...reviewRecords.values()].filter(item => Number(item.mastery) >= 80).length;
+    if (insight) insight.textContent = `${dueCount} due for review · ${secureCount}/${cards.length} cards secure · next review in ${intervalDays} day${intervalDays === 1 ? "" : "s"}`;
+    if (userId) {
+      btn.disabled = true;
+      try { await setDoc(doc(db, "users", userId, "learningReviews", key), record, { merge: true }); }
+      catch (error) { console.warn("Could not save spaced-repetition review.", error); }
+      finally { btn.disabled = false; }
+    } else {
+      try { localStorage.setItem(`sg-review:${key}`, JSON.stringify(record)); } catch {}
+    }
+    index=(index+1)%cards.length;revealed=false;show();
+  });
+  const dueCount = [...reviewRecords.values()].filter(item => item.nextReviewAt && new Date(item.nextReviewAt).getTime() <= Date.now()).length;
+  const insight = section.querySelector("[data-review-insight]");
+  const secureCount = [...reviewRecords.values()].filter(item => Number(item.mastery) >= 80).length;
+  if (insight) insight.textContent = `${dueCount} due for review · ${secureCount}/${cards.length} cards secure${userId ? " · schedule synced to your account" : " · saved on this device"}`;
   show();
 }
 
@@ -165,7 +234,7 @@ export async function mountLearningEnhancements({course, lesson, pageType, topic
   boardPanel.querySelector("[data-sg-board]").addEventListener("change",async e=>{const next=e.target.value;board=next;boardInfo=boardInfoFor(course,board);boardPanel.querySelector("h2").innerHTML=`${esc(board)} <span>${esc(boardInfo.code)}</span>`;boardPanel.querySelector("p").textContent=boardInfo.detail;boardPanel.querySelector("a").href=boardInfo.url;try{localStorage.setItem(`sg-board:${course.slug}`,board);}catch{}if(user&&id){try{await updateDoc(doc(db,"users",id),{boards:{...(profile?.boards||{}),[subjectName]:board}});boardPanel.querySelector("a").insertAdjacentText("afterend"," · Saved to your profile");}catch(error){console.warn("Could not sync exam board selection.",error);}}if(course.slug==="maths"){const meta=main.querySelector("[data-sg-meta]");if(meta)meta.textContent=`Board changed to ${board}. Generate a fresh set to use this board context.`;}});
   const activeLesson=topicSlug?course.notes.find(n=>n.title.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"")===topicSlug):null;
   const flashLesson=activeLesson||course.notes[0];
-  if(flashLesson){const wrapper=document.createElement("div");wrapper.innerHTML=renderFlashcards(course,flashLesson);const lessonPlayer=main.querySelector(".lesson-player");const lessonCard=main.querySelector(".course-note-card");const anchor=lessonPlayer||lessonCard||main.querySelector(".course-view-tabs");if(anchor)anchor.insertAdjacentElement("afterend",wrapper.firstElementChild);else main.append(wrapper.firstElementChild);window.__sgCourse=course;window.__sgLesson=flashLesson;initFlashcards(main);}
+  if(flashLesson){const wrapper=document.createElement("div");wrapper.innerHTML=renderFlashcards(course,flashLesson);const lessonPlayer=main.querySelector(".lesson-player");const lessonCard=main.querySelector(".course-note-card");const anchor=lessonPlayer||lessonCard||main.querySelector(".course-view-tabs");if(anchor)anchor.insertAdjacentElement("afterend",wrapper.firstElementChild);else main.append(wrapper.firstElementChild);window.__sgCourse=course;window.__sgLesson=flashLesson;void initFlashcards(main, id, course, flashLesson);}
   if(course.slug==="maths"&&pageType==="worksheets"){const wrapper=document.createElement("div");wrapper.innerHTML=renderGenerator();const target=main.querySelector(".course-material-list");if(target)target.insertAdjacentElement("beforebegin",wrapper.firstElementChild);else main.append(wrapper.firstElementChild);initGenerator(main,board);}
   if(course.slug==="maths"&&topicSlug){const diagram=buildDiagram(course.slug,topicSlug);const lesson=main.querySelector(".lesson-player");if(diagram&&lesson){const slide=lesson.querySelector(".lesson-slide-intro");if(slide)slide.insertAdjacentHTML("beforeend",diagram);}}
 }

@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS app_records (
 );
 
 CREATE INDEX IF NOT EXISTS app_records_owner_path_idx ON app_records (owner_id, path);
+CREATE INDEX IF NOT EXISTS app_records_path_prefix_idx ON app_records (path text_pattern_ops);
 CREATE INDEX IF NOT EXISTS app_records_updated_at_idx ON app_records (updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS school_applications (

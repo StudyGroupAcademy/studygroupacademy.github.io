@@ -50,6 +50,7 @@
             <button class="tab is-active" type="button" role="tab" data-tab="overview" aria-selected="true"><span>⌂</span> Overview</button>
             <button class="tab" type="button" role="tab" data-tab="planner" aria-selected="false"><span>▦</span> Planner</button>
             <button class="tab" type="button" role="tab" data-tab="calculator" aria-selected="false"><span>±</span> Calculator</button>
+            <button class="tab" type="button" role="tab" data-tab="tools" aria-selected="false"><span>✧</span> Study tools</button>
             <button class="tab" type="button" role="tab" data-tab="timer" aria-selected="false"><span>◷</span> Focus timer</button>
             <button class="tab" type="button" role="tab" data-tab="cards" aria-selected="false"><span>▤</span> Flashcards</button>
             <button class="tab" type="button" role="tab" data-tab="notes" aria-selected="false"><span>✎</span> Notes</button>
@@ -167,6 +168,35 @@
               <section class="card school-section"><h3>Account notifications</h3><div class="item-list" id="school-notifications"></div></section>
             </div>
             <section class="card school-section" id="school-application-state" hidden><h3>School application</h3><p id="school-application-message"></p></section>
+          </div>
+
+          <div class="panel" data-panel="tools" hidden>
+            <div class="study-tools-heading"><span class="eyebrow"><span></span> PRACTICAL REVISION TOOLS</span><h3>Make your next answer stronger.</h3><p>Small tools for planning, explaining and checking your learning.</p></div>
+            <div class="study-tools-grid">
+              <section class="card study-tool-card">
+                <span class="sg-eyebrow">ENGLISH · PARAGRAPH PLANNER</span><h3>Build a PEEL paragraph</h3><p>Plan the parts of an analytical paragraph, then copy the structured draft into your notes.</p>
+                <label>Point<input id="peel-point" maxlength="240" placeholder="What is your main argument?" /></label>
+                <label>Evidence<input id="peel-evidence" maxlength="240" placeholder="Which short quotation supports it?" /></label>
+                <label>Method<input id="peel-method" maxlength="160" placeholder="Which word or technique matters?" /></label>
+                <label>Analysis<textarea id="peel-analysis" rows="3" maxlength="500" placeholder="What does it suggest, and why?" ></textarea></label>
+                <label>Link<input id="peel-link" maxlength="240" placeholder="How does this connect to the question?" /></label>
+                <div class="study-tool-output" id="peel-output" aria-live="polite">Your paragraph plan will appear here.</div>
+                <button class="button button-dark" id="peel-copy" type="button">Copy paragraph plan</button>
+              </section>
+              <section class="card study-tool-card">
+                <span class="sg-eyebrow">GCSE · QUICK REFERENCE</span><h3>Formula and facts shelf</h3><p>A compact reference for common maths and science relationships. Always check your exam-board specification for required formulae.</p>
+                <details><summary>Mathematics</summary><ul><li>Area of a triangle = ½ × base × perpendicular height</li><li>Area of a circle = πr²</li><li>Circumference = 2πr</li><li>Gradient = change in y ÷ change in x</li><li>Percentage multiplier = 1 ± percentage ÷ 100</li></ul></details>
+                <details><summary>Physics</summary><ul><li>Speed = distance ÷ time</li><li>Density = mass ÷ volume</li><li>Weight = mass × gravitational field strength</li><li>Potential difference = current × resistance (V = IR)</li><li>Power = energy transferred ÷ time</li></ul></details>
+                <details><summary>Chemistry</summary><ul><li>Number of neutrons = mass number − atomic number</li><li>Relative formula mass = sum of relative atomic masses</li><li>Concentration (g/dm³) = mass (g) ÷ volume (dm³)</li></ul></details>
+              </section>
+              <section class="card study-tool-card study-session-builder">
+                <span class="sg-eyebrow">FOCUSED STUDY · SESSION BUILDER</span><h3>Plan a short revision session</h3><p>Choose a subject and time. StudyGroup will split it into manageable blocks.</p>
+                <label>Subject<select id="session-subject"><option>Maths</option><option>English</option><option>Biology</option><option>Chemistry</option><option>Physics</option><option>Computer Science</option><option>History</option><option>Geography</option><option>French</option><option>Spanish</option></select></label>
+                <label>Available time<select id="session-duration"><option value="15">15 minutes</option><option value="25" selected>25 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></label>
+                <button class="button button-dark" id="build-session-plan" type="button">Build my session</button>
+                <ol class="study-session-plan" id="study-session-plan"><li>Choose your subject and available time to create a plan.</li></ol>
+              </section>
+            </div>
           </div>
 
           <div class="panel" data-panel="timer" hidden>
