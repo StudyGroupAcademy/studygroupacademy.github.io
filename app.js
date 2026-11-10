@@ -57,7 +57,7 @@ async function socialSignIn(providerName) {
     window.location.assign(redirectUrl || callbackURL.toString());
   } catch (error) {
     console.error(`StudyGroup ${providerName} sign-in failed.`, error);
-    setFormError(errorContainer, error.message || "Sign-in could not be completed. Please try again.");
+    setFormError(errorContainer, getErrorMessage(error));
   }
 }
 
@@ -143,7 +143,7 @@ authForm.addEventListener("submit", async (event) => {
       errorContainer,
       accountCreated
         ? "Your account was created, but we couldn't finish saving your profile. Log in with your new account to continue."
-        : error.message || getErrorMessage(error)
+        : getErrorMessage(error)
     );
   } finally {
     submitButton.disabled = false;
@@ -171,7 +171,7 @@ $("#forgot-password").addEventListener("click", async () => {
     showToast("If an account exists for that email, a password reset message is on its way.");
   } catch (error) {
     console.error("StudyGroup password reset failed.", error);
-    setFormError(errorContainer, error.message || getErrorMessage(error));
+    setFormError(errorContainer, getErrorMessage(error));
   }
 });
 
@@ -199,7 +199,7 @@ schoolApplicationForm.addEventListener("submit", async (event) => {
     result.textContent = "Application sent. The StudyGroup administrator will review your school details.";
   } catch (caught) {
     console.error("Could not submit the school application.", caught);
-    setFormError(error, caught.message || "The school application could not be submitted.");
+    setFormError(error, getErrorMessage(caught));
   } finally {
     button.disabled = false;
     button.textContent = "Send application";
@@ -258,7 +258,7 @@ $("#auth-sign-out").addEventListener("click", async () => {
     showToast("You have been signed out.");
   } catch (error) {
     console.error("Could not sign out of StudyGroup.", error);
-    showToast(error.message || "Sign-out could not be completed.");
+    showToast(getErrorMessage(error));
   }
 });
 
@@ -315,7 +315,7 @@ if (homeworkForm) homeworkForm.addEventListener("submit", async (event) => {
     status.textContent = "Upload complete. The file is private in Cloudinary; assignment records and sharing are not connected yet.";
   } catch (error) {
     console.error("StudyGroup homework upload failed.", error);
-    status.textContent = error.message || "The file could not be uploaded.";
+    status.textContent = getErrorMessage(error);
   } finally {
     button.disabled = false;
   }

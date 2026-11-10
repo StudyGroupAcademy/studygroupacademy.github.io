@@ -1,4 +1,5 @@
 import { collection, doc, getDoc, getDocs } from "./firestore-client.js";
+import { getErrorMessage } from "./core.js";
 
 const rawQuery = window.location.search.slice(1).split("&")[0];
 const queryHandle = decodeURIComponent(rawQuery.split("=")[0] || "").trim().replace(/^@/, "").toLowerCase();
@@ -14,7 +15,7 @@ if (!reserved.has(handle) && /^[a-z0-9_]{3,20}$/.test(handle)) {
     <footer class="public-profile-footer">StudyGroup · Learn a little, every day.</footer>`);
   loadProfile(handle).catch((error) => {
     const target = document.querySelector("#public-profile-content");
-    if (target) target.innerHTML = `<div class="public-profile-error"><span>404</span><h1>Profile unavailable</h1><p>${escapeHTML(error.message || "This profile could not be loaded.")}</p><a href="/">Return to StudyGroup</a></div>`;
+    if (target) target.innerHTML = `<div class="public-profile-error"><span>404</span><h1>Profile unavailable</h1><p>${escapeHTML(getErrorMessage(error))}</p><a href="/">Return to StudyGroup</a></div>`;
   });
 }
 

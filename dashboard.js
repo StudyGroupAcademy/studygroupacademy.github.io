@@ -1,6 +1,6 @@
 import { authClient, getCurrentSession, getSessionUser } from "./auth-client.js";
 import { addDoc, arrayUnion, collection, completeActivity, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, syncLeaderboardXp, updateDoc, where } from "./firestore-client.js";
-import { $, $$, db, state, showBanner } from "./core.js";
+import { $, $$, db, state, showBanner, getErrorMessage } from "./core.js";
 import { ensureUserProfile, saveDailyGoal, saveProfileChoices, takeWelcomeFlag } from "./session.js";
 import { computeBadges, computeStats, consumeOAuthCallback, describeOAuthError } from "./helpers.js";
 import { initResourceFilter, setLessonUser } from "./resources.js";
@@ -50,7 +50,7 @@ export async function initDashboard() {
     currentUser = user ? { ...user, uid: user.id || user.uid } : null;
   } catch (err) {
     currentUser = null;
-    showBanner(err.message || "We couldn't restore your sign-in session. Please refresh and try again.", true);
+    showBanner(getErrorMessage(err), true);
   }
 
   document.body.classList.remove("checking");
@@ -62,7 +62,10 @@ export async function initDashboard() {
 
   await handleSignedInUser(currentUser);
   const welcomeFromProfile = takeWelcomeFlag();
-  if (welcomePending || welcomeFromProfile) openProfileDialog(true);
+  // Show the current onboarding experience to existing accounts that have not completed this version.
+  // This also covers users whose old profile predates the onboarding welcome flag.
+  const onboardingVersion = Number(state.profile?.onboardingVersion || 0);
+  if (welcomePending || welcomeFromProfile || onboardingVersion < 2) openProfileDialog(true);
 }
 
 async function handleSignedInUser(user) {
@@ -204,7 +207,7 @@ function bindNavigation() {
         window.location.replace(new URL("../", window.location.href).toString());
       } catch (error) {
         console.error("StudyGroup sign-out failed.", error);
-        showBanner(error.message || "We couldn't sign you out. Please try again.", true);
+        showBanner(getErrorMessage(error), true);
         signOutBtn.disabled = false;
       }
     });
@@ -431,7 +434,7 @@ function bindProfileDialog() {
         const errBox = $("#profile-error");
         if (errBox) {
           errBox.hidden = false;
-          errBox.textContent = err.message || "Failed to link Google account.";
+          errBox.textContent = getErrorMessage(err);
         }
       }
     });
@@ -485,7 +488,7 @@ function bindProfileDialog() {
       dialog.close();
       await handleSignedInUser(currentUser);
     } catch (err) {
-      if (error) { error.hidden = false; error.textContent = err.message || "Couldn't save your preferences."; }
+      if (error) { error.hidden = false; error.textContent = getErrorMessage(err); }
     } finally { skipButton.disabled = false; }
   });
 
@@ -514,7 +517,7 @@ function bindProfileDialog() {
     } catch (err) {
       if (errBox) {
         errBox.hidden = false;
-        errBox.textContent = err.message || "Failed to save preferences.";
+        errBox.textContent = getErrorMessage(err);
       }
     }
   });
@@ -567,7 +570,7 @@ function openAccountSettings() {
   const dialog = $("#account-settings-dialog"); if (!dialog || !currentUser) return;
   const error = $("#account-settings-error"); if (error) { error.hidden = true; error.textContent = ""; error.classList.remove("is-error"); }
   $("#account-current-email").value = currentUser.email || ""; $("#account-new-email").value = "";
-  getDoc(doc(db, "users", currentUser.uid)).then((snapshot) => { if (snapshot.exists()) $("#account-handle").value = snapshot.data().handle || ""; }).catch((err) => console.warn("Could not load account settings", err));
+  getDoc(doc(db, "users", currentUser.uid)).then((snapshot) => { if (snapshot.exists()) $("#account-settings-handle").value = snapshot.data().handle || ""; }).catch((err) => console.warn("Could not load account settings", err));
   dialog.showModal();
 }
 
@@ -578,16 +581,51 @@ $("#request-email-change")?.addEventListener("click", async (event) => {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { error.hidden = false; error.textContent = "Enter a valid new email address."; return; }
   button.disabled = true; error.hidden = true;
   try { await authClient.requestEmailChange({ email }); error.hidden = false; error.classList.remove("is-error"); error.textContent = "Verification email sent. Your address will change only after you verify it."; }
-  catch (err) { error.hidden = false; error.classList.add("is-error"); error.textContent = err.message || "We couldn't send the verification email. You may need to sign in again."; }
+  catch (err) { error.hidden = false; error.classList.add("is-error"); error.textContent = getErrorMessage(err); }
   finally { button.disabled = false; }
 });
 $("#save-account-handle")?.addEventListener("click", async (event) => {
-  const button = event.currentTarget, error = $("#account-settings-error"), handle = $("#account-handle").value.trim().toLowerCase();
+  const button = event.currentTarget, error = $("#account-settings-error"), handle = $("#account-settings-handle").value.trim().toLowerCase();
   if (!/^[a-z0-9_]{3,20}$/.test(handle)) { error.hidden = false; error.textContent = "Use 3–20 letters, numbers or underscores for your username."; return; }
   button.disabled = true; error.hidden = true;
   try { const snapshot = await getDoc(doc(db, "users", currentUser.uid)); if (!snapshot.exists()) throw new Error("Your profile could not be found."); const profile = snapshot.data(); const existingHandle = await getDoc(doc(db, "publicProfiles", handle)); if (existingHandle.exists() && existingHandle.data().uid !== currentUser.uid) throw new Error("That username is already in use. Try another one."); await saveProfileChoices({ ...profile, handle }, Boolean(profile.leaderboardOptIn)); error.hidden = false; error.classList.remove("is-error"); error.textContent = "Username saved."; }
-  catch (err) { error.hidden = false; error.classList.add("is-error"); error.textContent = err.message || "Couldn't save your username."; }
+  catch (err) { error.hidden = false; error.classList.add("is-error"); error.textContent = getErrorMessage(err); }
   finally { button.disabled = false; }
+});
+
+
+const deleteAccountDialog = $("#delete-account-dialog");
+const deleteAccountForm = $("#delete-account-form");
+$("#open-delete-account")?.addEventListener("click", () => {
+  $("#account-settings-dialog")?.close();
+  $("#delete-account-confirmation").value = "";
+  $("#delete-account-password").value = "";
+  $("#delete-account-error").hidden = true;
+  $("#confirm-delete-account").disabled = true;
+  deleteAccountDialog?.showModal();
+});
+deleteAccountDialog?.querySelectorAll("[data-close-delete-account]").forEach((button) => button.addEventListener("click", () => deleteAccountDialog.close()));
+$("#delete-account-confirmation")?.addEventListener("input", (event) => {
+  $("#confirm-delete-account").disabled = event.currentTarget.value.trim() !== "DELETE";
+});
+deleteAccountForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("#confirm-delete-account"), errorBox = $("#delete-account-error");
+  if ($("#delete-account-confirmation").value.trim() !== "DELETE") return;
+  button.disabled = true;
+  button.textContent = "Removing your account…";
+  errorBox.hidden = true;
+  try {
+    await authClient.deleteAccount({ password: $("#delete-account-password").value });
+    deleteAccountDialog.close();
+    window.location.assign("/");
+  } catch (error) {
+    console.error("Account deletion could not be completed.", error);
+    errorBox.hidden = false;
+    errorBox.textContent = getErrorMessage(error);
+    button.textContent = "Delete my account permanently";
+    button.disabled = $("#delete-account-confirmation").value.trim() !== "DELETE";
+  }
 });
 
 function evaluateArithmetic(expression) {
@@ -851,7 +889,7 @@ function bindNoteActions() {
       await loadNotes();
     } catch (err) {
       console.error("Failed to save note:", err);
-      showBanner(err.message || "Your note could not be saved. Please try again.", true);
+      showBanner(getErrorMessage(err), true);
     }
   });
 
@@ -869,7 +907,7 @@ function bindNoteActions() {
         await loadNotes();
       } catch (err) {
         console.error("Failed to delete note:", err);
-        showBanner(err.message || "Your note could not be deleted. Please try again.", true);
+        showBanner(getErrorMessage(err), true);
       }
     });
   }
@@ -929,7 +967,7 @@ function openGroupChat(code, name, memberCount = 1) {
     (error) => {
       console.error("Could not load group messages:", error);
       const box = $("#chat-messages");
-      if (box) box.innerHTML = `<div class="chat-error">Messages could not be loaded. ${escapeHtml(error.message || "Please try again.")}</div>`;
+      if (box) box.innerHTML = `<div class="chat-error">Messages could not be loaded. ${escapeHtml(getErrorMessage(error))}</div>`;
     }
   );
 }
@@ -957,7 +995,7 @@ function bindGroupActions() {
       openGroupChat(code, name, 1);
     } catch (error) {
       console.error("Could not create study group:", error);
-      showBanner(error.message || "Your group could not be created. Please try again.", true);
+      showBanner(getErrorMessage(error), true);
     } finally {
       if (button) button.disabled = false;
     }
@@ -986,7 +1024,7 @@ function bindGroupActions() {
       openGroupChat(groupId, group.name, (group.memberIds || []).length + ((group.memberIds || []).includes(currentUser.uid) ? 0 : 1));
     } catch (error) {
       console.error("Could not join study group:", error);
-      showBanner(error.message || "You could not join this group. Please check the code and try again.", true);
+      showBanner(getErrorMessage(error), true);
     } finally {
       if (button) button.disabled = false;
     }
@@ -1025,7 +1063,7 @@ function bindGroupActions() {
         await deleteDoc(messageRef);
       }
     } catch (error) {
-      showBanner(error.message || "That message could not be changed.", true);
+      showBanner(getErrorMessage(error), true);
     }
   });
 
@@ -1060,7 +1098,7 @@ function bindGroupActions() {
       input.focus();
     } catch (error) {
       console.error("Could not send group message:", error);
-      showBanner(error.message || "Your message could not be sent. Please try again.", true);
+      showBanner(getErrorMessage(error), true);
     } finally {
       if (button) button.disabled = false;
     }
@@ -1107,7 +1145,7 @@ function bindGroupActions() {
       await loadGroups();
     } catch (error) {
       console.error("Could not leave study group:", error);
-      showBanner(error.message || "Could not leave this group. Please try again.", true);
+      showBanner(getErrorMessage(error), true);
     } finally {
       leaveBtn.disabled = false;
     }
@@ -1525,7 +1563,7 @@ async function loadGroups() {
     }
   } catch (error) {
     console.error("Could not load study groups:", error);
-    container.innerHTML = `<div class="group-list-error">Your groups could not be loaded. ${escapeHtml(error.message || "Please refresh and try again.")}</div>`;
+    container.innerHTML = `<div class="group-list-error">Your groups could not be loaded. ${escapeHtml(getErrorMessage(error))}</div>`;
   }
 }
 

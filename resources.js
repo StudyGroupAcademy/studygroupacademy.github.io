@@ -1,5 +1,5 @@
 import { collection, completeActivity, getDocs, limit, query } from "./firestore-client.js";
-import { $, $$, db, state } from "./core.js";
+import { $, $$, db, state, getErrorMessage } from "./core.js";
 import { courses } from "./course-catalog.js";
 
 const lessons = [
@@ -143,7 +143,7 @@ async function completeLesson(lesson, feedback) {
     feedback.classList.add("is-correct");
   } catch (error) {
     console.error("Could not save lesson progress.", error);
-    feedback.textContent = `Your answer is correct, but we couldn't save the XP: ${error.message || "please try again."}`;
+    feedback.textContent = `Your answer is correct, but we couldn't save the XP: ${getErrorMessage(error)}`;
     feedback.classList.add("is-error");
   }
 }

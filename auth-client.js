@@ -11,7 +11,11 @@ import {
   signOut,
   updateProfile,
   linkWithPopup,
-  onAuthStateChanged
+  onAuthStateChanged,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
+  deleteUser
 } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
 
 const firebaseConfig = {
@@ -129,6 +133,34 @@ export const authClient = {
     if (provider !== "google") throw new Error("Only Google account linking is configured.");
     if (!auth.currentUser) throw new Error("Sign in before linking Google.");
     return linkWithPopup(auth.currentUser, googleProvider);
+  },
+  deleteAccount: async ({ password = "" } = {}) => {
+    const user = auth.currentUser;
+    if (!user) throw new Error("Please log in again before deleting your account.");
+    const providers = user.providerData.map((item) => item.providerId);
+    if (providers.includes("password")) {
+      if (!password) throw new Error("Enter your current password to confirm it's really you.");
+      await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
+    } else if (providers.includes("google.com")) {
+      await reauthenticateWithPopup(user, googleProvider);
+    } else {
+      throw new Error("This account needs a fresh sign-in before it can be deleted. Log out and sign in again, then retry.");
+    }
+    const token = await user.getIdToken(true);
+    const response = await fetch("https://studygroupacademy-github-io.onrender.com/api/account/delete", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: true }),
+      cache: "no-store"
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "We couldn't remove your StudyGroup data. Your account has not been deleted.");
+    try {
+      await deleteUser(user);
+    } catch (error) {
+      throw new Error("Your StudyGroup learning data has been removed, but Firebase could not finish closing your sign-in account. Please contact the StudyGroup team before trying again.");
+    }
+    return { ok: true };
   },
   token: getAuthToken
 };

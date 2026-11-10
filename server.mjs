@@ -1102,6 +1102,34 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/account/delete") {
+      if (request.method !== "POST") throw new Error("Method not allowed.");
+      if (!identity) { sendJson(response, 401, { error: "Please sign in again before deleting your account." }, origin); return; }
+      const body = await readJson(request);
+      if (body.confirm !== true) { sendJson(response, 400, { error: "Account deletion was not confirmed." }, origin); return; }
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const uid = identity.id;
+        // Remove the user's authored/private records and public profile data.
+        await client.query("DELETE FROM app_records WHERE owner_id = $1 OR left(path, length($2)) = $2", [uid, `users/${uid}/`]);
+        // Remove their membership from shared groups without deleting other students' groups.
+        await client.query(`UPDATE app_records SET data = jsonb_set(data, '{memberIds}', COALESCE((SELECT jsonb_agg(value) FROM jsonb_array_elements(COALESCE(data->'memberIds','[]'::jsonb)) value WHERE value #>> '{}' <> $2), '[]'::jsonb), true), updated_at = now() WHERE path LIKE 'groups/%' AND data ? 'memberIds' AND data->'memberIds' @> to_jsonb(ARRAY[$2]::text[])`, [uid, uid]);
+        await client.query("DELETE FROM assignment_comments WHERE author_id = $1", [uid]);
+        await client.query("DELETE FROM assignment_submissions WHERE student_id = $1", [uid]);
+        await client.query("DELETE FROM assignment_teachers WHERE user_id = $1", [uid]);
+        await client.query("DELETE FROM school_invites WHERE created_by = $1", [uid]);
+        await client.query("UPDATE school_members SET active = false, email = '', display_name = 'Former member' WHERE user_id = $1", [uid]);
+        await client.query("DELETE FROM firebase_auth_identities WHERE firebase_uid = $1 OR legacy_user_id = $2", [identity.firebaseUid, uid]);
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally { client.release(); }
+      sendJson(response, 200, { ok: true, message: "StudyGroup data removed." }, origin);
+      return;
+    }
+
     if (url.pathname === "/api/schools") {
       if (request.method !== "POST") throw new Error("Method not allowed.");
       const body = await readJson(request);

@@ -1,4 +1,4 @@
-import { $, $$ } from "./core.js";
+import { $, $$, getErrorMessage } from "./core.js";
 import { schoolRequest, uploadSchoolFile } from "./school-client.js";
 import { setSchoolCalendarEvents } from "./workspace.js";
 
@@ -281,7 +281,7 @@ async function loadSchoolContext() {
     }
   } catch (error) {
     console.error("Could not load the school workspace.", error);
-    setStatus(error.message || "The school workspace could not be loaded. Try refreshing.", true);
+    setStatus(getErrorMessage(error), true);
     $("#school-portal").hidden = true;
   }
 }
@@ -386,7 +386,7 @@ async function handleSubmit(event) {
     }
   } catch (error) {
     console.error("A school workspace action failed.", error);
-    setStatus(error.message || "That school action could not be completed.", true);
+    setStatus(getErrorMessage(error), true);
   } finally {
     const button = form.querySelector('button[type="submit"]');
     if (button) button.disabled = false;
@@ -437,7 +437,7 @@ async function handleClick(event) {
     }
   } catch (error) {
     console.error("A school workspace action failed.", error);
-    setStatus(error.message || "That school action could not be completed.", true);
+    setStatus(getErrorMessage(error), true);
   } finally {
     if (review) review.disabled = false;
     if (reissue) reissue.disabled = false;

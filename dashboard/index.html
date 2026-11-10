@@ -345,10 +345,27 @@
         <label>New email address<input id="account-new-email" type="email" autocomplete="email" placeholder="you@example.com" /></label>
         <button class="button button-light" id="request-email-change" type="button">Send verification email</button>
         <p class="form-hint">Your email changes only after you open the verification link sent by Firebase. You may need to sign in again if your session is old.</p>
-        <label>Username / handle<input id="account-handle" type="text" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" autocomplete="username" /></label>
+        <label>Username / handle<input id="account-settings-handle" type="text" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" autocomplete="username" /></label>
         <button class="button button-light" id="save-account-handle" type="button">Save username</button>
         <div class="settings-sound-row"><div><strong>Sound effects</strong><small>Interface and learning sounds</small></div><button class="sound-toggle" type="button" data-sound-toggle aria-pressed="true">Sound on</button></div>
+        <section class="account-danger-zone"><div><strong>Delete your account</strong><p>Permanently remove your StudyGroup profile and personal learning data. This cannot be undone.</p></div><button class="button account-delete-trigger" id="open-delete-account" type="button">Delete account</button></section>
         <button class="button button-dark" type="button" data-close-account-settings>Done</button>
+      </form>
+    </dialog>
+
+    <dialog class="app-dialog delete-account-dialog" id="delete-account-dialog" aria-labelledby="delete-account-title">
+      <form class="dialog-form" id="delete-account-form">
+        <button class="dialog-close" type="button" data-close-delete-account aria-label="Close dialog">×</button>
+        <span class="eyebrow delete-eyebrow">PERMANENT ACCOUNT ACTION</span>
+        <h2 id="delete-account-title">Are you absolutely sure?</h2>
+        <p class="dialog-intro">Deleting your account is permanent. Your StudyGroup profile, learning progress, saved notes, personal records and public profile will be removed. School records may be retained where needed for the school's own records, with your membership deactivated.</p>
+        <div class="delete-warning"><strong>This cannot be undone.</strong><span>You will be signed out and won't be able to restore this account or its personal learning history.</span></div>
+        <label>Type <strong>DELETE</strong> to confirm<input id="delete-account-confirmation" type="text" autocomplete="off" spellcheck="false" placeholder="Type DELETE" required /></label>
+        <label id="delete-password-label">Current password<input id="delete-account-password" type="password" autocomplete="current-password" placeholder="Required for email and password accounts" /></label>
+        <p class="form-hint">If you use Google sign-in, leave the password blank. Google will ask you to confirm your identity.</p>
+        <div class="auth-error" id="delete-account-error" role="alert" hidden></div>
+        <button class="button account-delete-confirm" id="confirm-delete-account" type="submit" disabled>Delete my account permanently</button>
+        <button class="button button-light" type="button" data-close-delete-account>Keep my account</button>
       </form>
     </dialog>
 

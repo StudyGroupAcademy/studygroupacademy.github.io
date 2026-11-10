@@ -3,9 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Find your GCSE revision people. StudyGroup brings free resources and study motivation together, without charging students." />
-    <meta name="theme-color" content="#f8f7f3" />
-    <title>StudyGroup: GCSE revision is better together</title>
+    <meta name="description" content="A free student-built study space for clearer notes, useful practice and calmer GCSE revision. Made by students, for students." />
+    <meta name="theme-color" content="#f2eee4" />
+    <meta property="og:title" content="StudyGroup | Made by students, for students" />
+    <meta property="og:description" content="A free place to understand tricky topics, practise what you have learned and make progress at your own pace." />
+    <meta property="og:type" content="website" />
+    <title>StudyGroup | Made by students, for students</title>
     <link rel="icon" type="image/png" href="assets/favicon.png" />
     <link rel="apple-touch-icon" href="assets/favicon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -19,9 +22,9 @@
     <header class="site-header">
       <a class="brand" href="#" aria-label="StudyGroup home"><img src="assets/wordmark.png" alt="StudyGroup" /></a>
       <nav class="site-nav" aria-label="Main navigation">
-        <a href="#how-it-works">How it works</a>
-        <a href="#resources">Free resources</a>
-        <a href="#community">Community</a>
+        <a href="#why-studygroup">Why StudyGroup</a>
+        <a href="#how-it-works">What you can do</a>
+        <a href="#resources">Explore resources</a>
       </nav>
       <div class="header-actions">
         <button class="button button-quiet" data-open-auth="signin" type="button">Log in</button>
@@ -30,75 +33,51 @@
       </div>
     </header>
 
-    <main>
-      <section class="hero">
-        <div class="hero-copy">
-          <div class="announcement"><span class="announcement-dot"></span> A calmer way to tackle your GCSEs <span>✳</span></div>
-          <h1>Revision feels<br />lighter <span class="serif-accent">together.</span></h1>
-          <p>Find the right resources, meet people who get it, and make a little progress at a time. Your GCSE revision space, built around you.</p>
-          <div class="hero-actions"><button class="button button-dark button-large" data-open-auth="signup" type="button">Find your study people <span>→</span></button><a class="hero-secondary" href="#how-it-works">See how it works <span>↓</span></a></div>
-          <div class="hero-proof"><div class="avatar-stack"><span class="mini-avatar mini-a">A</span><span class="mini-avatar mini-b">M</span><span class="mini-avatar mini-c">J</span><span class="mini-avatar mini-d">S</span></div><p><strong>A space for every kind of student.</strong><br />No streak pressure. No paywall to learn.</p></div>
+    <main class="new-home">
+      <section class="new-hero" aria-labelledby="home-title">
+        <div class="new-hero-copy">
+          <div class="new-kicker"><span class="new-kicker-dot"></span> MADE BY STUDENTS. BUILT FOR STUDENTS.</div>
+          <h1 id="home-title">School is hard enough.<br><em>Studying shouldn't be.</em></h1>
+          <p class="new-hero-lede">A free place to understand tricky topics, practise what you've learned and make progress at your own pace. No perfect-student act required.</p>
+          <div class="new-hero-actions"><button class="button button-dark button-large" data-open-auth="signup" type="button">Build my free study space <span>→</span></button><a href="#why-studygroup" class="new-text-link">See why students built this <span>↓</span></a></div>
+          <div class="new-hero-note"><span class="new-note-mark">✳</span><span><strong>Made with students in mind.</strong><br>Designed around real school routines, not corporate assumptions.</span></div>
         </div>
-        <div class="hero-art" aria-label="Study together illustration">
-          <div class="art-sun"></div><span class="art-caption caption-top">YOUR NEXT STEP</span><div class="art-note note-one"><span class="note-icon note-lilac">∑</span><span><b>Algebra basics</b><small>One topic at a time</small></span><span class="note-check">✓</span></div>
-          <div class="art-circle"><span class="art-flower">✳</span><span class="art-circle-copy">little by<br />little.</span></div>
-          <div class="art-note note-two"><span class="note-icon note-mint">✿</span><span><b>Biology, together</b><small>Find your study people</small></span><span class="online-people"><i></i><i></i><i></i></span></div>
-          <span class="art-caption caption-bottom">GCSE REVISION, YOUR WAY <span>✳</span></span><span class="art-orbit orbit-a"></span><span class="art-orbit orbit-b"></span>
-        </div>
-      </section>
-
-      <div class="value-strip"><div><span class="value-icon">£</span><span><strong>Free-first, always</strong><small>Learn without a paywall</small></span></div><i></i><div><span class="value-icon value-lilac">⌕</span><span><strong>Less searching, more learning</strong><small>Useful stuff, easier to find</small></span></div><i></i><div><span class="value-icon value-green">♡</span><span><strong>Built around students</strong><small>Made to grow with your feedback</small></span></div></div>
-
-      <section class="homework-section" id="homework-uploads">
-        <div class="homework-card">
-          <div>
-            <span class="eyebrow"><span></span> PRIVATE FILE UPLOADS</span>
-            <h2>Homework, <span>in one safe place.</span></h2>
-            <p>Verified schools can post assignments and instructions. Invited students can hand in a file or written response, then talk privately with the teachers assigned to that homework.</p>
-          </div>
-          <div class="homework-upload-area">
-            <p>Schools can apply for verification. School administrators then invite their teachers and students and choose their permissions. School accounts are invite-only.</p>
-            <div class="school-entry-actions"><button class="button button-dark" id="open-school-application" type="button">School sign-up <span>→</span></button><button class="button button-light" data-open-auth="signin" type="button">Teacher, student or school login</button></div>
-            <p id="school-application-result" role="status" aria-live="polite"></p>
-          </div>
+        <div class="new-hero-visual" aria-label="A preview of the StudyGroup learning space">
+          <div class="new-orbit new-orbit-one"></div><div class="new-orbit new-orbit-two"></div>
+          <div class="new-preview-window"><div class="new-preview-top"><span class="new-preview-brand"><i></i> your study space</span><span class="new-preview-dots">•••</span></div><div class="new-preview-greeting"><small>YOUR NEXT STEP</small><strong>Little by little<br>adds up.</strong><span>Choose one thing to work on today.</span></div><div class="new-preview-progress"><div><span>Weekly progress</span><b>Keep going</b></div><div class="new-progress-track"><i></i></div><small>Progress is personal. Go at your pace.</small></div><div class="new-preview-subjects"><span class="new-subject-tile new-tile-maths"><b>∑</b><strong>Maths</strong><small>Work through a method</small></span><span class="new-subject-tile new-tile-science"><b>✳</b><strong>Science</strong><small>Understand the ideas</small></span></div></div>
+          <div class="new-float-card new-float-top"><span>✎</span><div><b>Notes that explain</b><small>Not just a wall of text</small></div></div><div class="new-float-card new-float-bottom"><span>✓</span><div><b>Practice that makes sense</b><small>Learn from every attempt</small></div></div>
         </div>
       </section>
 
-      <section class="how-section" id="how-it-works">
-        <div class="section-intro"><span class="eyebrow"><span></span> A BETTER PLACE TO BEGIN</span><h2>GCSE revision,<br /><span>without the overwhelm.</span></h2><p>You don't need another giant to-do list. You need a place to find a resource, make a plan that feels possible, and remember you aren't doing it alone.</p></div>
-        <div class="feature-list">
-          <article class="feature-row"><span class="feature-number">01</span><span class="feature-symbol feature-search">⌕</span><div><h3>Start with a lesson, not another search.</h3><p>Use short, original StudyGroup explainers and worked examples to get unstuck. Practise at your pace and reveal an explanation when you're ready.</p></div><span class="feature-arrow">↗</span></article>
-          <article class="feature-row"><span class="feature-number">02</span><span class="feature-symbol feature-group">◎</span><div><h3>Make studying feel less solo.</h3><p>Plan a realistic next step, track your own progress, and find people working through the same things. No pressure to compete.</p></div><span class="feature-arrow">↗</span></article>
-          <article class="feature-row"><span class="feature-number">03</span><span class="feature-symbol feature-step">✳</span><div><h3>Keep schoolwork in one place.</h3><p>Verified schools can invite their own teachers and students, share instructions, collect written or file submissions, and leave private feedback.</p></div><span class="feature-arrow">↗</span></article>
+      <section class="new-trust-strip" aria-label="StudyGroup principles"><span>FREE TO LEARN</span><i></i><span>STUDENT-LED THINKING</span><i></i><span>YOUR PACE, YOUR PLAN</span><i></i><span>BUILT TO KEEP IMPROVING</span></section>
+
+      <section class="new-section new-why" id="why-studygroup">
+        <div class="new-section-heading"><div class="new-kicker">WHY WE STARTED</div><h2>Because we've been<br><em>the students too.</em></h2></div>
+        <div class="new-why-copy"><p>We know what it's like to have five tabs open, three different revision sites, a deadline tomorrow and no idea where to begin.</p><p>StudyGroup is being built by students who wanted a clearer, calmer way to learn. We are making the kind of study space we wished we had: useful, welcoming and shaped by the people who actually use it.</p><a href="#student-built" class="new-text-link">The student-built difference <span>↗</span></a></div>
+      </section>
+
+      <section class="new-section new-benefits" id="how-it-works">
+        <div class="new-center-heading"><div class="new-kicker">ONE PLACE. A FEW GOOD WAYS TO LEARN.</div><h2>Less hunting around.<br><em>More understanding.</em></h2><p>Start with what you need today. Come back when you're ready for the next thing.</p></div>
+        <div class="new-benefit-grid">
+          <article class="new-benefit-card"><span class="new-benefit-icon icon-notes">Aa</span><small>01 / UNDERSTAND</small><h3>Notes that teach, not just tell.</h3><p>Read clear explanations, follow worked examples and build up an idea one step at a time.</p><a href="/content/" class="new-card-link">Explore learning materials ↗</a></article>
+          <article class="new-benefit-card"><span class="new-benefit-icon icon-practice">✓</span><small>02 / HAVE A GO</small><h3>Practice without the pressure.</h3><p>Use worksheets, flashcards and Quick Fire practice to check what is sticking and what needs another look.</p><a href="/content/" class="new-card-link">Find something to practise ↗</a></article>
+          <article class="new-benefit-card"><span class="new-benefit-icon icon-plan">↗</span><small>03 / KEEP MOVING</small><h3>A study space that feels yours.</h3><p>Choose your subjects, set manageable goals and keep your learning organised in one place.</p><a href="dashboard/" class="new-card-link">See your study space ↗</a></article>
+          <article class="new-benefit-card"><span class="new-benefit-icon icon-people">◎</span><small>04 / FEEL SUPPORTED</small><h3>Make learning less lonely.</h3><p>Join a friendly community, share encouragement and celebrate progress without making grades a competition.</p><a href="#community" class="new-card-link">Meet the community ↗</a></article>
         </div>
       </section>
 
+      <section class="new-quote-band" id="student-built"><div class="new-quote-symbol">“</div><div><div class="new-kicker">THE STUDENT-BUILT DIFFERENCE</div><h2>Not a platform guessing<br>what students need.</h2><p>A platform students can help shape. We listen to feedback, improve what feels confusing and build features around real learning needs. It's a work in progress, and that's exactly why student voices matter.</p></div><div class="new-quote-stamp"><strong>STUDENT</strong><span>IDEAS →</span><strong>BETTER</strong><span>LEARNING</span></div></section>
 
-      <section class="resource-showcase" id="resources">
-        <div class="resource-showcase-heading"><div><span class="eyebrow"><span></span> EXPLORE THE LEARNING LIBRARY</span><h2>Start with one subject.<br /><span>Build from there.</span></h2><p>Browse the starter lessons and worksheets currently available. New material can be added as the library grows.</p></div><a class="resource-browse-link" href="/content/">Explore all subjects <span>↗</span></a></div>
-        <div class="resource-showcase-grid">
-          <a class="resource-showcase-card resource-maths" href="/content/maths/notes/"><span class="resource-card-icon">∑</span><span class="resource-card-kicker">WORK THROUGH THE METHOD</span><strong>Mathematics</strong><small>Clear explanations, worked examples and practice.</small><span class="resource-card-arrow">Explore maths ↗</span></a>
-          <a class="resource-showcase-card resource-science" href="/content/biology/notes/"><span class="resource-card-icon">✳</span><span class="resource-card-kicker">UNDERSTAND THE IDEAS</span><strong>Biology</strong><small>Build understanding one concept at a time.</small><span class="resource-card-arrow">Explore biology ↗</span></a>
-          <a class="resource-showcase-card resource-english" href="/content/english/notes/"><span class="resource-card-icon">Aa</span><span class="resource-card-kicker">READ, THINK, EXPLAIN</span><strong>English</strong><small>Develop analysis and communicate your ideas.</small><span class="resource-card-arrow">Explore English ↗</span></a>
-          <a class="resource-showcase-card resource-chemistry" href="/content/chemistry/worksheets/"><span class="resource-card-icon">⚗</span><span class="resource-card-kicker">PRACTISE AND CHECK</span><strong>Chemistry</strong><small>Try questions, check answers and reveal working.</small><span class="resource-card-arrow">Try worksheets ↗</span></a>
-        </div>
-        <div class="resource-showcase-foot"><span>Original starter resources</span><span>Free to explore</span><span>More subjects in the library</span></div>
-      </section>
+      <section class="new-section new-library" id="resources"><div class="new-library-heading"><div><div class="new-kicker">TAKE A LOOK AROUND</div><h2>Start with one<br><em>topic you want to crack.</em></h2><p>Explore the starter materials currently available. The library is growing, and we'd rather be honest about what's here than pretend it's finished.</p></div><a href="/content/" class="button button-dark">Browse the library <span>↗</span></a></div><div class="new-library-grid"><a href="/content/maths/notes/" class="new-library-card"><span>∑</span><b>Mathematics</b><small>Methods, examples and practice</small><i>Explore ↗</i></a><a href="/content/biology/notes/" class="new-library-card"><span>✳</span><b>Biology</b><small>Understand key ideas clearly</small><i>Explore ↗</i></a><a href="/content/english/notes/" class="new-library-card"><span>Aa</span><b>English</b><small>Read, analyse and explain</small><i>Explore ↗</i></a><a href="/content/chemistry/worksheets/" class="new-library-card"><span>⚗</span><b>Chemistry</b><small>Put your knowledge to work</small><i>Explore ↗</i></a></div></section>
 
-      <section class="community-section" id="community">
-        <div class="community-copy"><span class="eyebrow"><span></span> LITTLE WINS, CELEBRATED</span><h2>A little encouragement.<br /><span>A lot more belonging.</span></h2><p>Opt into a friendly study leaderboard to cheer each other on. It counts one daily check-in, not grades, hours, or how smart you are. You can keep it private or leave whenever you like.</p><button class="button button-dark" data-open-auth="signup" type="button">Join the community <span>→</span></button><div class="privacy-note" id="privacy-note"><span>♧</span> Only your chosen nickname appears on the public board.</div></div>
-        <div class="leaderboard-card">
-          <div class="leaderboard-header"><div><span class="leaderboard-label"><i></i> OUR STUDY COMMUNITY</span><h3>A little goes a long way</h3></div><button class="refresh-button" id="refresh-leaderboard" type="button" aria-label="Refresh leaderboard" title="Refresh">↻</button></div>
-          <p class="leaderboard-subtitle">A daily check-in leaderboard. Kindness over competition.</p>
-          <div id="leaderboard-list" class="leaderboard-list" aria-live="polite"><div class="leaderboard-loading"><span class="loading-spinner"></span> Finding our first study buddies…</div></div>
-          <div class="leaderboard-footer"><span>One check-in per 24 hours</span><span>Nickname only <b>✳</b></span></div>
-        </div>
-      </section>
+      <section class="new-community" id="community"><div class="new-community-copy"><div class="new-kicker">GOOD ENERGY, NOT GRADE PRESSURE</div><h2>Progress looks<br><em>different for everyone.</em></h2><p>StudyGroup is about showing up for your own learning. If you want, opt into a friendly nickname-only leaderboard that celebrates small check-ins, not marks or hours.</p><button class="button button-dark" data-open-auth="signup" type="button">Find your place <span>→</span></button></div><div class="leaderboard-card new-leaderboard"><div class="leaderboard-header"><div><span class="leaderboard-label"><i></i> OUR STUDY COMMUNITY</span><h3>A little goes a long way</h3></div><button class="refresh-button" id="refresh-leaderboard" type="button" aria-label="Refresh leaderboard" title="Refresh">↻</button></div><p class="leaderboard-subtitle">A daily check-in leaderboard. Kindness over competition.</p><div id="leaderboard-list" class="leaderboard-list" aria-live="polite"><div class="leaderboard-loading"><span class="loading-spinner"></span> Finding our first study buddies…</div></div><div class="leaderboard-footer"><span>One check-in per 24 hours</span><span>Nickname only <b>✳</b></span></div></div></section>
 
-      <section class="final-cta"><img src="assets/Watermark.png" alt="" /><span class="eyebrow"><span></span> YOUR NEXT CHAPTER STARTS SMALL</span><h2>You don't have to figure<br />it all out <span>on your own.</span></h2><p>Join free. Find your first resource. Take it from there.</p><button class="button button-dark button-large" data-open-auth="signup" type="button">Make yourself at home <span>→</span></button><small>No payment details. No pressure. Just a place to start.</small></section>
+      <section class="new-school-callout" id="school-workspace"><div><div class="new-kicker">FOR SCHOOLS AND TEACHERS</div><h2>Bring your classroom<br><em>into the study space.</em></h2><p>Verified schools can invite their teachers and students, share assignments and manage private feedback in a dedicated workspace.</p></div><div class="new-school-actions"><button class="button button-dark" id="open-school-application" type="button">School sign-up <span>→</span></button><button class="button button-light" data-open-auth="signin" type="button">Teacher or student login</button><p id="school-application-result" role="status" aria-live="polite"></p></div></section>
+
+      <section class="new-final-cta"><div class="new-kicker">YOU CAN START SMALL</div><h2>Your next study session<br>can feel <em>different.</em></h2><p>Make a free account, choose what you're learning and take one useful step.</p><button class="button button-dark button-large" data-open-auth="signup" type="button">Create my free study space <span>→</span></button><small>No payment details. No pressure. Just a better place to begin.</small></section>
     </main>
 
-    <footer class="site-footer"><a class="brand footer-brand" href="#"><img src="assets/wordmark.png" alt="StudyGroup" /></a><span>Built for curious minds, one student at a time.</span><a href="#privacy-note">Your nickname stays yours <span>✳</span></a></footer>
+    <footer class="site-footer"><a class="brand footer-brand" href="#"><img src="assets/wordmark.png" alt="StudyGroup" /></a><span>Made by students, for students.</span><a href="#privacy-note">Your nickname stays yours <span>✳</span></a></footer>
 
     <dialog class="app-dialog" id="auth-dialog" aria-labelledby="auth-title">
       <form class="dialog-form" id="auth-form">

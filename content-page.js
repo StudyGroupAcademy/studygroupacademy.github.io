@@ -2,7 +2,7 @@ import { courses } from "./course-catalog.js";
 import { lessonGuides } from "./lesson-guides.js";
 import { authClient, getCurrentSession, getSessionUser } from "./auth-client.js";
 import { collection, completeActivity, doc, getDoc, getDocs, limit, query } from "./firestore-client.js";
-import { db } from "./core.js";
+import { db, getErrorMessage } from "./core.js";
 import { earnedNameTag } from "./helpers.js";
 import { mountLearningEnhancements } from "./learning-engine.js";
 import { playSound } from "./sound-effects.js";
@@ -240,7 +240,7 @@ function bindFullLesson() {
       completeButton.textContent = "Lesson complete ✓";
     } catch (error) {
       console.error("Could not complete the lesson.", error);
-      status.textContent = error.message || "Progress could not be saved. Please try again.";
+      status.textContent = getErrorMessage(error);
       completeButton.disabled = false;
       completeButton.textContent = "Try saving again · earn 10 XP";
     }
@@ -331,7 +331,7 @@ function bindWorksheets() {
         awardButton.textContent = "Worksheet complete ✓";
       } catch (error) {
         console.error("Could not save worksheet completion.", error);
-        result.textContent = error.message || "Progress could not be saved. Please try again.";
+        result.textContent = getErrorMessage(error);
         awardButton.disabled = false;
         awardButton.textContent = "Try saving again · earn 10 XP";
       }
@@ -382,7 +382,7 @@ async function renderSidebarAccount() {
         window.location.assign(new URL("/", window.location.origin).toString());
       } catch (error) {
         console.error("Could not sign out from the subject library.", error);
-        container.insertAdjacentHTML("beforeend", `<p class="course-account-error">${escapeHtml(error.message || "Sign out failed. Please try again.")}</p>`);
+        container.insertAdjacentHTML("beforeend", `<p class="course-account-error">${escapeHtml(getErrorMessage(error))}</p>`);
       }
     });
   } catch (error) {
