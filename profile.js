@@ -22,6 +22,7 @@ async function loadProfile(username) {
   const snapshot = await getDoc(doc(null, "publicProfiles", username));
   if (!snapshot.exists()) throw new Error("We couldn't find a public profile with that handle.");
   const profile = snapshot.data();
+  if (profile.profileVisibility === "private") throw new Error("This learner has chosen to keep their profile private.");
   const leaderboard = await getDocs(collection(null, "publicLeaderboard")).catch(() => ({ docs: [] }));
   const ranked = leaderboard.docs.map((entry) => entry.data()).sort((a, b) => Number(b.xp) - Number(a.xp));
   const rankIndex = ranked.findIndex((entry) => entry.uid === profile.uid);
@@ -43,7 +44,7 @@ async function loadProfile(username) {
   target.className = "public-profile-content";
   target.innerHTML = `
     <section class="public-profile-hero">
-      <div class="public-profile-avatar">${escapeHTML(name.slice(0, 1).toUpperCase())}</div>
+      <div class="public-profile-avatar" data-accent="${escapeHTML(profile.profileAccent || "sage")}">${escapeHTML(name.slice(0, 1).toUpperCase())}</div>
       <div class="public-profile-identity"><span class="public-profile-eyebrow">STUDYGROUP LEARNER</span><h1>${escapeHTML(name)}</h1><p>@${escapeHTML(username)}</p></div>
       <div class="public-profile-xp"><strong>${xp.toLocaleString()}</strong><span>total XP</span></div>
     </section>

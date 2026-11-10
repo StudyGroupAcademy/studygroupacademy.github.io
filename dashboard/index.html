@@ -20,6 +20,7 @@
       <nav class="site-nav" aria-label="Main navigation">
         <a href="#workspace">My workspace</a>
       </nav>
+      <button class="sound-toggle" type="button" data-sound-toggle aria-pressed="false">Sound off</button>
       <div class="global-notification-menu" id="global-notification-menu">
         <button class="notification-bell" id="notification-toggle" type="button" aria-expanded="false" aria-controls="notification-popover" aria-label="Notifications">
           <span aria-hidden="true">♧</span><span class="notification-count" id="notification-count" hidden>0</span>
@@ -227,7 +228,7 @@
                 <div class="chat-room" id="chat-room" hidden>
                   <div class="chat-head"><div><strong id="chat-title"></strong><small id="chat-meta"></small></div><div class="chat-actions"><button class="button button-light" type="button" id="copy-code">Copy invite code</button><button class="button button-light" type="button" id="leave-group">Leave group</button></div></div>
                   <div class="chat-messages" id="chat-messages" aria-live="polite"></div>
-                  <form class="chat-form" id="chat-form"><input name="text" type="text" maxlength="500" placeholder="Message your group" autocomplete="off" aria-label="Message" /><button class="button button-dark" type="submit">Send</button></form>
+                  <form class="chat-form" id="chat-form"><div class="chat-reply-preview" id="chat-reply-preview" hidden></div><input name="text" type="text" maxlength="500" placeholder="Message your group" autocomplete="off" aria-label="Message" /><button class="button button-dark" type="submit">Send</button></form>
                 </div>
               </div>
             </div>
@@ -316,6 +317,7 @@
         <label>Your account name<input name="displayName" type="text" minlength="2" maxlength="60" autocomplete="name" required /></label>
         <label>Your handle<input name="handle" type="text" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" placeholder="yourname_1234" autocomplete="username" required /><small class="form-hint">Shown with an @. A short account-specific suffix is added to new handles.</small></label>
         <label>A short bio<textarea name="bio" maxlength="240" rows="3" placeholder="A little about what you are learning…"></textarea></label>
+        <div class="profile-customisation-grid"><label>Profile accent<select name="profileAccent"><option value="sage">Sage green</option><option value="ocean">Ocean blue</option><option value="clay">Warm clay</option><option value="lavender">Soft lavender</option></select></label><label>Public profile<select name="profileVisibility"><option value="public">Visible to anyone with my link</option><option value="private">Private profile</option></select></label></div>
         <section class="onboarding-section" aria-labelledby="learning-setup-title">
           <div class="profile-intro-grid"><span class="profile-step">02</span><span><strong id="learning-setup-title">Set up your learning</strong><small>Choose your subjects and exam boards. You can change these later.</small></span></div>
           <div class="signup-board-grid" id="onboarding-board-grid"></div>

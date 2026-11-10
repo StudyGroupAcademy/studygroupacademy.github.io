@@ -1,3 +1,4 @@
+import "./sound-effects.js";
 import { authClient, getAuthToken, getCurrentSession, getSessionUser, normalizeSessionResult } from "./auth-client.js";
 import { $, $$, db, getErrorMessage, setFormError, showBanner, showToast } from "./core.js";
 import { doc, serverTimestamp, setDoc, syncLeaderboardXp } from "./firestore-client.js";

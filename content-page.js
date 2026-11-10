@@ -5,6 +5,7 @@ import { collection, completeActivity, doc, getDoc, getDocs, limit, query } from
 import { db } from "./core.js";
 import { earnedNameTag } from "./helpers.js";
 import { mountLearningEnhancements } from "./learning-engine.js";
+import { playSound } from "./sound-effects.js";
 
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -32,9 +33,9 @@ function renderNotes() {
   if (topicSlug) return renderFullLesson(note, lessonGuide);
   const notes = topicSlug ? course.notes.filter((entry) => slugify(entry.title) === topicSlug) : course.notes;
   return `<div class="course-material-list">${notes.map((note, index) => `<article class="course-note-card">
-    <div class="course-note-kicker">STUDYGROUP NOTES · ${String(index + 1).padStart(2, "0")}</div>
+    <div class="course-note-kicker"><span>STUDYGROUP LESSON</span><span>${String(index + 1).padStart(2, "0")} / ${String(notes.length).padStart(2, "0")}</span></div>
     ${topicSlug ? "" : `<a class="course-note-title-link" href="/content/${course.slug}/notes/${slugify(note.title)}/"><h3>${escapeHtml(note.title)}</h3><span>Open lesson →</span></a>`}
-    ${topicSlug ? `<h3>${escapeHtml(note.title)}</h3>` : ""}<p>${escapeHtml(note.summary)}</p>
+    ${topicSlug ? `<h3>${escapeHtml(note.title)}</h3>` : ""}<p>${escapeHtml(note.summary)}</p><div class="course-material-meta"><span>◷ Guided reading</span><span>✓ Key ideas</span><span>✎ Worked example</span></div>
     <ul>${note.points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}</ul>
     <div class="course-example"><strong>Worked example</strong><p>${escapeHtml(note.example)}</p></div>
   </article>`).join("")}</div>`;
@@ -61,8 +62,8 @@ function renderFullLesson(lesson, guide) {
 
 function renderWorksheets() {
   return `<div class="course-material-list worksheet-list">${course.worksheets.map((sheet, sheetIndex) => `<article class="course-note-card course-worksheet">
-    <div class="course-note-kicker">STUDYGROUP PRACTICE · ${sheet.questions.length} QUESTIONS</div><h3>${escapeHtml(sheet.title)}</h3>
-    <p>Enter an answer for each question and check it straight away. Complete the whole sheet to earn 10 XP.</p>
+    <div class="course-note-kicker"><span>WORKSHEET · ${String(sheetIndex + 1).padStart(2, "0")}</span><span>${sheet.questions.length} QUESTIONS</span></div><h3>${escapeHtml(sheet.title)}</h3>
+    <p>Build confidence with focused questions. Check each response, reveal worked solutions when you need support, and track your progress as you go.</p><div class="course-material-meta"><span>◎ Instant feedback</span><span>↗ Worked solutions</span><span>★ 10 XP on completion</span></div>
     <form class="worksheet-player" data-worksheet-id="${escapeHtml(`worksheet-${course.slug}-${sheetIndex + 1}`)}">
       <ol class="worksheet-questions">${sheet.questions.map((question, sourceIndex) => ({ question, sourceIndex })).sort(() => Math.random() - 0.5).map(({ question, sourceIndex }, questionIndex) => `<li class="worksheet-question" data-worksheet-question="${questionIndex}" data-question-source="${sourceIndex}">
         <label><span>${escapeHtml(question.prompt)}</span><input type="text" autocomplete="off" maxlength="500" placeholder="Type your answer…" required /></label>
@@ -225,8 +226,8 @@ function bindFullLesson() {
       }
     });
   });
-  previous.addEventListener("click", () => showSlide(activeIndex - 1));
-  next.addEventListener("click", () => showSlide(activeIndex + 1));
+  previous.addEventListener("click", () => { playSound("flip"); showSlide(activeIndex - 1); });
+  next.addEventListener("click", () => { playSound("flip"); showSlide(activeIndex + 1); });
   const completeButton = lesson.querySelector("[data-complete-lesson]");
   const status = lesson.querySelector("[data-complete-status]");
   completeButton.addEventListener("click", async () => {
@@ -245,6 +246,7 @@ function bindFullLesson() {
       }
       localStorage.setItem(completionKey, "completed");
       localStorage.removeItem(stepKey);
+      playSound("xp");
       completeButton.classList.add("is-complete");
       completeButton.textContent = "Lesson complete ✓";
     } catch (error) {
@@ -309,6 +311,7 @@ function bindWorksheets() {
           checkButton.disabled = true;
           feedback.innerHTML = `<strong>Correct!</strong> ${escapeHtml(questionData.working.join(" "))} Answer: ${escapeHtml(correctAnswer)}`;
           feedback.classList.add("is-correct");
+          playSound("success");
         } else {
           feedback.textContent = `Not quite yet. Try again; hint: ${questionData.working[0]}`;
           feedback.classList.add("is-error");
@@ -335,6 +338,7 @@ function bindWorksheets() {
           result.textContent = "All answers correct — worksheet completed on this device. Sign in to save it and earn XP.";
         }
         localStorage.setItem(completionKey, "completed");
+        playSound("xp");
         awardButton.textContent = "Worksheet complete ✓";
       } catch (error) {
         console.error("Could not save worksheet completion.", error);

@@ -5,6 +5,7 @@ import { ensureUserProfile, saveDailyGoal, saveProfileChoices, takeWelcomeFlag }
 import { computeBadges, computeStats, consumeOAuthCallback, describeOAuthError } from "./helpers.js";
 import { initResourceFilter, setLessonUser } from "./resources.js";
 import { initSchoolPortal, startSchoolPortal } from "./school-portal.js";
+import { playSound } from "./sound-effects.js";
 
 const DEFAULT_SUBJECTS = ["Maths", "English", "Science", "Computer Science", "History", "Geography", "French", "Spanish"];
 
@@ -24,6 +25,7 @@ let timerMode = "focus";
 let activeDeck = null;
 let cardIndex = 0;
 let cardShowingAnswer = false;
+let replyToMessage = null;
 
 export async function initDashboard() {
   bindNavigation();
@@ -83,6 +85,7 @@ async function handleSignedInUser(user) {
     showBanner("You're signed in, but your profile could not be saved yet. Your account name is shown while we reconnect.", true);
   }
   state.profile = profile;
+  document.documentElement.dataset.profileAccent = profile.profileAccent || "sage";
   renderSignedIn(profile);
   populateSubjectDropdowns();
   setLessonUser(user);
@@ -449,7 +452,7 @@ function bindProfileDialog() {
     try {
       skipButton.disabled = true;
       const boards = Object.fromEntries(onboardingSubjects.map((subject) => [subject, String(data.get(`board:${subject}`) || "")]).filter(([, value]) => value));
-      await saveProfileChoices({ nickname, displayName, handle, bio: String(data.get("bio") || ""), boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "" }, data.get("leaderboardOptIn") === "on");
+      await saveProfileChoices({ nickname, displayName, handle, bio: String(data.get("bio") || ""), boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "", profileAccent: data.get("profileAccent") || "sage", profileVisibility: data.get("profileVisibility") || "public" }, data.get("leaderboardOptIn") === "on");
       dialog.close();
       await handleSignedInUser(currentUser);
     } catch (err) {
@@ -471,11 +474,12 @@ function bindProfileDialog() {
     const errBox = $("#profile-error");
     try {
       if (errBox) errBox.hidden = true;
-      await saveProfileChoices({ nickname, displayName, handle, bio, boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "" }, optIn);
+      await saveProfileChoices({ nickname, displayName, handle, bio, boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "", profileAccent: data.get("profileAccent") || "sage", profileVisibility: data.get("profileVisibility") || "public" }, optIn);
       dialog.close();
       const snapshot = await getDoc(doc(db, "users", currentUser.uid));
       if (snapshot.exists()) {
         state.profile = snapshot.data();
+        document.documentElement.dataset.profileAccent = state.profile.profileAccent || "sage";
         renderSignedIn(state.profile);
       }
     } catch (err) {
@@ -505,6 +509,8 @@ async function openProfileDialog(isWelcome) {
       if (form.elements["displayName"]) form.elements["displayName"].value = data.displayName || "";
       if (form.elements["handle"]) form.elements["handle"].value = data.handle || "";
       if (form.elements["bio"]) form.elements["bio"].value = data.bio || "";
+      if (form.elements["profileAccent"]) form.elements["profileAccent"].value = data.profileAccent || "sage";
+      if (form.elements["profileVisibility"]) form.elements["profileVisibility"].value = data.profileVisibility || "public";
       if (form.elements["leaderboardOptIn"]) form.elements["leaderboardOptIn"].checked = Boolean(data.leaderboardOptIn);
       for (const [subject, board] of Object.entries(data.boards || {})) {
         const field = form.elements[`board:${subject}`];
@@ -770,7 +776,7 @@ function bindNoteActions() {
     try {
       skipButton.disabled = true;
       const boards = Object.fromEntries(onboardingSubjects.map((subject) => [subject, String(data.get(`board:${subject}`) || "")]).filter(([, value]) => value));
-      await saveProfileChoices({ nickname, displayName, handle, bio: String(data.get("bio") || ""), boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "" }, data.get("leaderboardOptIn") === "on");
+      await saveProfileChoices({ nickname, displayName, handle, bio: String(data.get("bio") || ""), boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "", profileAccent: data.get("profileAccent") || "sage", profileVisibility: data.get("profileVisibility") || "public" }, data.get("leaderboardOptIn") === "on");
       dialog.close();
       await handleSignedInUser(currentUser);
     } catch (err) {
@@ -850,7 +856,8 @@ function renderGroupMessages(snapshot) {
     const stamp = message.createdAt?.toDate ? message.createdAt.toDate() : message.createdAt ? new Date(message.createdAt) : null;
     const time = stamp && !Number.isNaN(stamp.getTime()) ? stamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
     const senderMarkup = message.handle ? `<a href="/?${encodeURIComponent(message.handle)}" target="_blank" rel="noopener">${escapeHtml(sender)}</a>` : escapeHtml(sender);
-    return `<article class="chat-message${mine ? " mine" : ""}"><div class="chat-message-meta"><strong>${senderMarkup}</strong><time>${escapeHtml(time)}${message.editedAt ? " · edited" : ""}</time></div><p>${escapeHtml(message.text || "")}</p>${mine ? `<div class="chat-message-actions"><button type="button" data-message-edit="${escapeHtml(message.id)}">Edit</button><button type="button" data-message-delete="${escapeHtml(message.id)}">Delete</button></div>` : ""}</article>`;
+    const quoted = message.replyTo ? `<div class="chat-reply-quote"><strong>${escapeHtml(message.replyTo.name || "Member")}</strong><span>${escapeHtml(message.replyTo.text || "")}</span></div>` : "";
+    return `<article class="chat-message${mine ? " mine" : ""}" data-message-id="${escapeHtml(message.id)}"><div class="chat-message-meta"><strong>${senderMarkup}</strong><time>${escapeHtml(time)}${message.editedAt ? " · edited" : ""}</time></div>${quoted}<p>${escapeHtml(message.text || "")}</p><div class="chat-message-toolbar"><button type="button" class="chat-reply-button" data-message-reply="${escapeHtml(message.id)}" aria-label="Reply to ${escapeHtml(sender)}">↶ Reply</button><details class="chat-message-menu"><summary aria-label="More message actions" title="More actions">···</summary><div class="chat-message-menu-popover">${mine ? `<button type="button" data-message-edit="${escapeHtml(message.id)}">Edit message</button><button type="button" class="is-danger" data-message-delete="${escapeHtml(message.id)}">Delete message</button>` : `<span>Message options</span>`}</div></details></div></article>`;
   }).join("") : `<div class="chat-empty-state"><span class="chat-empty-icon">✦</span><strong>Start the conversation</strong><p>Send the first message to your study group.</p></div>`;
   if (nearBottom || box.dataset.firstRender === "true") box.scrollTop = box.scrollHeight;
   box.dataset.firstRender = "false";
@@ -949,10 +956,21 @@ function bindGroupActions() {
 
   const messageBox = $("#chat-messages");
   if (messageBox) messageBox.addEventListener("click", async (event) => {
+    const replyButton = event.target.closest("[data-message-reply]");
     const editButton = event.target.closest("[data-message-edit]");
     const deleteButton = event.target.closest("[data-message-delete]");
-    const messageId = editButton?.dataset.messageEdit || deleteButton?.dataset.messageDelete;
+    const messageId = replyButton?.dataset.messageReply || editButton?.dataset.messageEdit || deleteButton?.dataset.messageDelete;
     if (!messageId || !activeGroupCode) return;
+    if (replyButton) {
+      const article = replyButton.closest(".chat-message");
+      const sender = article?.querySelector(".chat-message-meta strong")?.textContent || "Member";
+      const body = article?.querySelector(":scope > p")?.textContent || "";
+      replyToMessage = { id: messageId, name: sender, text: body.slice(0, 180) };
+      const preview = $("#chat-reply-preview");
+      if (preview) { preview.hidden = false; preview.innerHTML = `<span>Replying to <strong>${escapeHtml(sender)}</strong><small>${escapeHtml(body.slice(0, 100))}</small></span><button type="button" data-cancel-reply aria-label="Cancel reply">×</button>`; }
+      $("#chat-form")?.elements.text?.focus();
+      return;
+    }
     const messageRef = doc(db, "groups", activeGroupCode, "messages", messageId);
     try {
       if (editButton) {
@@ -974,6 +992,12 @@ function bindGroupActions() {
   });
 
   const chatForm = $("#chat-form");
+  if (chatForm) chatForm.addEventListener("click", (event) => {
+    if (!event.target.closest("[data-cancel-reply]")) return;
+    replyToMessage = null;
+    const preview = $("#chat-reply-preview");
+    if (preview) { preview.hidden = true; preview.innerHTML = ""; }
+  });
   if (chatForm) chatForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!currentUser || !activeGroupCode) return;
@@ -987,8 +1011,13 @@ function bindGroupActions() {
       const profileData = profile.exists() ? profile.data() : {};
       const name = String(profileData.displayName || profileData.nickname || currentUser.name || "Learner").slice(0, 24);
       await addDoc(collection(db, "groups", activeGroupCode, "messages"), {
-        uid: currentUser.uid, name, handle: profileData.handle || "", text: text.slice(0, 500), createdAt: serverTimestamp()
+        uid: currentUser.uid, name, handle: profileData.handle || "", text: text.slice(0, 500),
+        ...(replyToMessage ? { replyTo: replyToMessage } : {}), createdAt: serverTimestamp()
       });
+      replyToMessage = null;
+      const replyPreview = $("#chat-reply-preview");
+      if (replyPreview) { replyPreview.hidden = true; replyPreview.innerHTML = ""; }
+      playSound("success");
       input.value = "";
       input.focus();
     } catch (error) {

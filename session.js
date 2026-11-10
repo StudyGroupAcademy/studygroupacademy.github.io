@@ -71,6 +71,7 @@ function publicProfileData(profile) {
     displayName: profile.displayName || profile.nickname || "Learner",
     nickname: profile.nickname || profile.displayName || "Learner",
     bio: profile.bio || "",
+    profileAccent: profile.profileAccent || "sage",
     xp: Number(profile.xp) || 0,
     yearGroup: profile.yearGroup || "",
     boards: profile.boards || {},
@@ -88,6 +89,8 @@ export async function saveProfileChoices(profileData, optIn) {
   const userDocRef = doc(null, "users", uid);
   const updates = {
     ...profileData,
+    profileAccent: ["sage", "ocean", "clay", "lavender"].includes(profileData.profileAccent) ? profileData.profileAccent : "sage",
+    profileVisibility: profileData.profileVisibility === "private" ? "private" : "public",
     leaderboardOptIn: optIn,
     onboardingComplete: true,
     updatedAt: new Date().toISOString()
@@ -98,7 +101,11 @@ export async function saveProfileChoices(profileData, optIn) {
   const oldHandle = String(existingProfile.handle || "").toLowerCase();
   const newHandle = String(profileData.handle || "").toLowerCase();
   if (!/^[a-z0-9_]{3,20}$/.test(newHandle)) throw new Error("Your handle must be 3–20 characters using letters, numbers or underscores.");
-  await setDoc(doc(null, "publicProfiles", newHandle), publicProfileData({ ...existingProfile, ...updates, uid }), { merge: true });
+  if (updates.profileVisibility === "private") {
+    await deleteDoc(doc(null, "publicProfiles", newHandle));
+  } else {
+    await setDoc(doc(null, "publicProfiles", newHandle), publicProfileData({ ...existingProfile, ...updates, uid }), { merge: true });
+  }
   await setDoc(userDocRef, updates, { merge: true });
   if (oldHandle && oldHandle !== newHandle) await deleteDoc(doc(null, "publicProfiles", oldHandle));
 
