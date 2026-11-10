@@ -810,7 +810,9 @@ function bindLeaderboardTabs() {
 function bindNoteActions() {
   const newBtn = $("#note-new");
   const form = $("#note-form");
-  if (newBtn && form) {
+  if (!form) return;
+
+  if (newBtn) {
     newBtn.addEventListener("click", () => {
       activeNoteId = null;
       form.reset();
@@ -819,113 +821,61 @@ function bindNoteActions() {
       const delBtn = $("#note-delete");
       if (delBtn) delBtn.hidden = true;
     });
-
-    const boardGrid = $("#onboarding-board-grid");
-  const boardOptions = ["AQA", "Edexcel", "Pearson Edexcel", "OCR", "WJEC", "Eduqas", "CCEA", "Other", "Not sure yet"];
-  const onboardingSubjects = ["Maths", "English Language", "English Literature", "Biology", "Chemistry", "Physics", "Combined Science", "Computer Science", "History", "Geography", "French", "Spanish"];
-  if (boardGrid && !boardGrid.dataset.ready) {
-    boardGrid.innerHTML = onboardingSubjects.map((subject) => `<label>${subject}<select name="board:${subject}"><option value="">Choose exam board</option>${boardOptions.map((board) => `<option value="${board}">${board}</option>`).join("")}</select></label>`).join("");
-    boardGrid.dataset.ready = "true";
   }
 
-  if (!form.dataset.wizardReady) {
-    const slides = document.createElement("div"); slides.className = "onboarding-slides";
-    const definitions = [
-      { title: "Your profile", selectors: [".profile-intro-grid", 'label:has([name="nickname"])', 'label:has([name="displayName"])', 'label:has([name="handle"])', 'label:has([name="bio"])', ".profile-customisation-grid"] },
-      { title: "Your subjects", selectors: [".onboarding-section"] },
-      { title: "Your study preferences", selectors: [".opt-in-field", "#link-google", "#link-google + .form-hint"] }
-    ];
-    definitions.forEach((definition, index) => {
-      const slide = document.createElement("section"); slide.className = "onboarding-step"; slide.dataset.onboardingStep = String(index); slide.hidden = index !== 0;
-      slide.innerHTML = `<div class="onboarding-step-heading"><span>STEP 0${index + 1} / 03</span><h3>${definition.title}</h3></div>`;
-      for (const selector of definition.selectors) { const node = form.querySelector(selector); if (node && !node.closest(".onboarding-slides")) slide.append(node); }
-      slides.append(slide);
-    });
-    const actions = form.querySelector(".onboarding-actions"); form.insertBefore(slides, actions);
-    const back = document.createElement("button"); back.type = "button"; back.className = "button button-light"; back.textContent = "← Back"; back.dataset.onboardingBack = ""; back.hidden = true;
-    const next = document.createElement("button"); next.type = "button"; next.className = "button button-dark"; next.textContent = "Continue →"; next.dataset.onboardingNext = "";
-    actions.insertBefore(back, actions.querySelector("#skip-onboarding")); actions.insertBefore(next, actions.querySelector(".dialog-submit"));
-    let active = 0;
-    const updateStep = () => { slides.querySelectorAll(".onboarding-step").forEach((slide, index) => { slide.hidden = index !== active; slide.classList.toggle("is-active", index === active); }); back.hidden = active === 0; next.hidden = active === 2; actions.querySelector(".dialog-submit").hidden = active !== 2; progress.style.setProperty("--step-progress", `${(active + 1) / 3 * 100}%`); };
-    back.addEventListener("click", () => { active = Math.max(0, active - 1); updateStep(); });
-    next.addEventListener("click", () => { const required = slides.querySelectorAll(`.onboarding-step[data-onboarding-step="${active}"] input[required], .onboarding-step[data-onboarding-step="${active}"] select[required]`); for (const field of required) if (!field.reportValidity()) return; active = Math.min(2, active + 1); updateStep(); });
-    const progress = document.createElement("div"); progress.className = "onboarding-progress"; progress.innerHTML = "<span></span>"; form.insertBefore(progress, slides);
-    form.dataset.wizardReady = "true"; form.__updateWizard = updateStep; form.__resetWizard = () => { active = 0; updateStep(); }; updateStep();
-  }
-
-  const skipButton = $("#skip-onboarding");
-  if (skipButton) skipButton.addEventListener("click", async () => {
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
     if (!currentUser) return;
     const data = new FormData(form);
-    const nickname = String(data.get("nickname") || currentUser.name || currentUser.email?.split("@")[0] || "StudyGroup student").trim();
-    const displayName = String(data.get("displayName") || nickname).trim();
-    const handle = String(data.get("handle") || `student_${String(currentUser.uid).slice(-4)}`).trim().toLowerCase();
-    const error = $("#profile-error");
+    const title = String(data.get("title") || "").trim();
+    const subject = String(data.get("subject") || "");
+    const body = String(data.get("body") || "");
+    if (!title) return;
+
     try {
-      skipButton.disabled = true;
-      const boards = Object.fromEntries(onboardingSubjects.map((subject) => [subject, String(data.get(`board:${subject}`) || "")]).filter(([, value]) => value));
-      await saveProfileChoices({ nickname, displayName, handle, bio: String(data.get("bio") || ""), boards, yearGroup: data.get("yearGroup") || "", preferredStudyTime: data.get("preferredStudyTime") || "", studyStartTime: data.get("studyStartTime") || "", dailyGoal: data.get("dailyGoal") || "", nextExamDate: data.get("nextExamDate") || "", profileAccent: data.get("profileAccent") || "sage", profileVisibility: data.get("profileVisibility") || "public" }, data.get("leaderboardOptIn") === "on");
-      dialog.close();
-      await handleSignedInUser(currentUser);
+      if (activeNoteId) {
+        await updateDoc(doc(db, "users", currentUser.uid, "notes", activeNoteId), {
+          title, subject, body, updatedAt: new Date().toISOString()
+        });
+      } else {
+        await setDoc(doc(collection(db, "users", currentUser.uid, "notes")), {
+          title, subject, body, createdAt: new Date().toISOString()
+        });
+      }
+      form.reset();
+      activeNoteId = null;
+      const status = $("#note-status");
+      if (status) status.textContent = "New note";
+      const delBtn = $("#note-delete");
+      if (delBtn) delBtn.hidden = true;
+      await loadNotes();
     } catch (err) {
-      if (error) { error.hidden = false; error.textContent = err.message || "Couldn't save your preferences."; }
-    } finally { skipButton.disabled = false; }
+      console.error("Failed to save note:", err);
+      showBanner(err.message || "Your note could not be saved. Please try again.", true);
+    }
   });
 
-  form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!currentUser) return;
-      const data = new FormData(form);
-      const title = data.get("title").trim();
-      const subject = data.get("subject");
-      const body = data.get("body");
-      if (!title) return;
-
+  const delBtn = $("#note-delete");
+  if (delBtn) {
+    delBtn.addEventListener("click", async () => {
+      if (!currentUser || !activeNoteId) return;
       try {
-        if (activeNoteId) {
-          await updateDoc(doc(db, "users", currentUser.uid, "notes", activeNoteId), {
-            title,
-            subject,
-            body,
-            updatedAt: new Date().toISOString()
-          });
-        } else {
-          await setDoc(doc(collection(db, "users", currentUser.uid, "notes")), {
-            title,
-            subject,
-            body,
-            createdAt: new Date().toISOString()
-          });
-        }
+        await deleteDoc(doc(db, "users", currentUser.uid, "notes", activeNoteId));
         form.reset();
         activeNoteId = null;
+        delBtn.hidden = true;
+        const status = $("#note-status");
+        if (status) status.textContent = "New note";
         await loadNotes();
       } catch (err) {
-        console.error("Failed to save note:", err);
+        console.error("Failed to delete note:", err);
+        showBanner(err.message || "Your note could not be deleted. Please try again.", true);
       }
     });
-
-    const delBtn = $("#note-delete");
-    if (delBtn) {
-      delBtn.addEventListener("click", async () => {
-        if (!currentUser || !activeNoteId) return;
-        try {
-          await deleteDoc(doc(db, "users", currentUser.uid, "notes", activeNoteId));
-          form.reset();
-          activeNoteId = null;
-          delBtn.hidden = true;
-          await loadNotes();
-        } catch (err) {
-          console.error("Failed to delete note:", err);
-        }
-      });
-    }
-
-    const searchInput = $("#note-search");
-    if (searchInput) {
-      searchInput.addEventListener("input", loadNotes);
-    }
   }
+
+  const searchInput = $("#note-search");
+  if (searchInput) searchInput.addEventListener("input", loadNotes);
 }
 
 function stopGroupMessages() {
