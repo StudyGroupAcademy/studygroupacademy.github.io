@@ -20,7 +20,7 @@
       <nav class="site-nav" aria-label="Main navigation">
         <a href="#workspace">My workspace</a>
       </nav>
-      <button class="sound-toggle" type="button" data-sound-toggle aria-pressed="false">Sound off</button>
+      <button class="sound-toggle" type="button" data-sound-toggle aria-pressed="true">Sound on</button>
       <div class="global-notification-menu" id="global-notification-menu">
         <button class="notification-bell" id="notification-toggle" type="button" aria-expanded="false" aria-controls="notification-popover" aria-label="Notifications">
           <span aria-hidden="true">♧</span><span class="notification-count" id="notification-count" hidden>0</span>
@@ -66,8 +66,8 @@
                   <div class="account-email" id="account-email"></div>
                   <a class="account-handle" id="account-handle" href="#">@your-handle</a>
                   <div class="account-badge" id="account-badge">Personal account</div>
-                  <button type="button" data-open-settings>Profile & account settings</button>
-                  <button type="button" data-open-settings>Personalise my study space</button>
+                  <button type="button" data-open-account-settings>Account settings</button>
+                  <button type="button" data-open-settings>Appearance & learning</button>
                   <button type="button" id="download-data">Download my data</button>
                   <button type="button" id="sign-out">Log out</button>
                 </div>
@@ -333,6 +333,22 @@
         <button class="button button-light" id="link-google" type="button">Connect Google</button>
         <small class="form-hint">If Google sign-in says your account is not linked, first log in here with your StudyGroup email and password, then connect Google.</small>
         <div class="onboarding-actions"><button class="button button-light" id="skip-onboarding" type="button">Skip for now</button><button class="button button-dark dialog-submit" type="submit">Save my preferences <span>→</span></button></div>
+      </form>
+    </dialog>
+
+    <dialog class="app-dialog account-settings-dialog" id="account-settings-dialog" aria-labelledby="account-settings-title">
+      <form class="dialog-form" id="account-settings-form">
+        <button class="dialog-close" type="button" data-close-account-settings aria-label="Close dialog">×</button>
+        <span class="eyebrow"><span></span> ACCOUNT & SECURITY</span><h2 id="account-settings-title">Account settings</h2><p class="dialog-intro">Manage your sign-in details and account preferences.</p>
+        <div class="auth-error" id="account-settings-error" role="alert" hidden></div>
+        <label>Current email<input id="account-current-email" type="email" readonly /></label>
+        <label>New email address<input id="account-new-email" type="email" autocomplete="email" placeholder="you@example.com" /></label>
+        <button class="button button-light" id="request-email-change" type="button">Send verification email</button>
+        <p class="form-hint">Your email changes only after you open the verification link sent by Firebase. You may need to sign in again if your session is old.</p>
+        <label>Username / handle<input id="account-handle" type="text" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" autocomplete="username" /></label>
+        <button class="button button-light" id="save-account-handle" type="button">Save username</button>
+        <div class="settings-sound-row"><div><strong>Sound effects</strong><small>Interface and learning sounds</small></div><button class="sound-toggle" type="button" data-sound-toggle aria-pressed="true">Sound on</button></div>
+        <button class="button button-dark" type="button" data-close-account-settings>Done</button>
       </form>
     </dialog>
 

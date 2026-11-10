@@ -181,6 +181,10 @@ function bindNavigation() {
       openProfileDialog(false);
     });
   });
+  $$("[data-open-account-settings]").forEach((btn) => btn.addEventListener("click", () => {
+    $("#account-popover").hidden = true;
+    openAccountSettings();
+  }));
 
   const signOutBtn = $("#sign-out");
   if (signOutBtn) {
@@ -441,6 +445,31 @@ function bindProfileDialog() {
     boardGrid.dataset.ready = "true";
   }
 
+  if (!form.dataset.wizardReady) {
+    const slides = document.createElement("div"); slides.className = "onboarding-slides";
+    const definitions = [
+      { title: "Your profile", selectors: [".profile-intro-grid", 'label:has([name="nickname"])', 'label:has([name="displayName"])', 'label:has([name="handle"])', 'label:has([name="bio"])', ".profile-customisation-grid"] },
+      { title: "Your subjects", selectors: [".onboarding-section"] },
+      { title: "Your study preferences", selectors: [".opt-in-field", "#link-google", "#link-google + .form-hint"] }
+    ];
+    definitions.forEach((definition, index) => {
+      const slide = document.createElement("section"); slide.className = "onboarding-step"; slide.dataset.onboardingStep = String(index); slide.hidden = index !== 0;
+      slide.innerHTML = `<div class="onboarding-step-heading"><span>STEP 0${index + 1} / 03</span><h3>${definition.title}</h3></div>`;
+      for (const selector of definition.selectors) { const node = form.querySelector(selector); if (node && !node.closest(".onboarding-slides")) slide.append(node); }
+      slides.append(slide);
+    });
+    const actions = form.querySelector(".onboarding-actions"); form.insertBefore(slides, actions);
+    const back = document.createElement("button"); back.type = "button"; back.className = "button button-light"; back.textContent = "← Back"; back.dataset.onboardingBack = ""; back.hidden = true;
+    const next = document.createElement("button"); next.type = "button"; next.className = "button button-dark"; next.textContent = "Continue →"; next.dataset.onboardingNext = "";
+    actions.insertBefore(back, actions.querySelector("#skip-onboarding")); actions.insertBefore(next, actions.querySelector(".dialog-submit"));
+    let active = 0;
+    const updateStep = () => { slides.querySelectorAll(".onboarding-step").forEach((slide, index) => { slide.hidden = index !== active; slide.classList.toggle("is-active", index === active); }); back.hidden = active === 0; next.hidden = active === 2; actions.querySelector(".dialog-submit").hidden = active !== 2; progress.style.setProperty("--step-progress", `${(active + 1) / 3 * 100}%`); };
+    back.addEventListener("click", () => { active = Math.max(0, active - 1); updateStep(); });
+    next.addEventListener("click", () => { const required = slides.querySelectorAll(`.onboarding-step[data-onboarding-step="${active}"] input[required], .onboarding-step[data-onboarding-step="${active}"] select[required]`); for (const field of required) if (!field.reportValidity()) return; active = Math.min(2, active + 1); updateStep(); });
+    const progress = document.createElement("div"); progress.className = "onboarding-progress"; progress.innerHTML = "<span></span>"; form.insertBefore(progress, slides);
+    form.dataset.wizardReady = "true"; form.__updateWizard = updateStep; form.__resetWizard = () => { active = 0; updateStep(); }; updateStep();
+  }
+
   const skipButton = $("#skip-onboarding");
   if (skipButton) skipButton.addEventListener("click", async () => {
     if (!currentUser) return;
@@ -495,11 +524,18 @@ async function openProfileDialog(isWelcome) {
   const dialog = $("#profile-dialog");
   const form = $("#profile-form");
   if (!dialog || !form || !currentUser) return;
+  dialog.classList.toggle("is-onboarding", Boolean(isWelcome));
+  form.__resetWizard?.();
+  const handleLabel = form.querySelector('label:has([name="handle"])');
+  const nicknameLabel = form.querySelector('label:has([name="nickname"])');
+  if (handleLabel) { handleLabel.hidden = !isWelcome; const field = handleLabel.querySelector("input"); if (field) field.required = Boolean(isWelcome); }
+  if (nicknameLabel) { nicknameLabel.hidden = !isWelcome; const field = nicknameLabel.querySelector("input"); if (field) field.required = Boolean(isWelcome); }
 
   const intro = $("#profile-intro");
   if (intro) {
-    intro.textContent = isWelcome ? "Welcome! Set your preferences to get started." : "Update your profile and account settings.";
+    intro.textContent = isWelcome ? "Welcome! Set up your learning space in a few quick steps." : "Personalise your display name, bio, subjects and study preferences.";
   }
+  const title = $("#profile-title"); if (title) title.textContent = isWelcome ? "Let's set up your study space." : "Appearance & learning";
 
   try {
     const snap = await getDoc(doc(db, "users", currentUser.uid));
@@ -526,6 +562,33 @@ async function openProfileDialog(isWelcome) {
 
   dialog.showModal();
 }
+
+function openAccountSettings() {
+  const dialog = $("#account-settings-dialog"); if (!dialog || !currentUser) return;
+  const error = $("#account-settings-error"); if (error) { error.hidden = true; error.textContent = ""; error.classList.remove("is-error"); }
+  $("#account-current-email").value = currentUser.email || ""; $("#account-new-email").value = "";
+  getDoc(doc(db, "users", currentUser.uid)).then((snapshot) => { if (snapshot.exists()) $("#account-handle").value = snapshot.data().handle || ""; }).catch((err) => console.warn("Could not load account settings", err));
+  dialog.showModal();
+}
+
+const accountSettingsDialog = $("#account-settings-dialog");
+accountSettingsDialog?.querySelectorAll("[data-close-account-settings]").forEach((button) => button.addEventListener("click", () => accountSettingsDialog.close()));
+$("#request-email-change")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget, error = $("#account-settings-error"), email = $("#account-new-email").value.trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { error.hidden = false; error.textContent = "Enter a valid new email address."; return; }
+  button.disabled = true; error.hidden = true;
+  try { await authClient.requestEmailChange({ email }); error.hidden = false; error.classList.remove("is-error"); error.textContent = "Verification email sent. Your address will change only after you verify it."; }
+  catch (err) { error.hidden = false; error.classList.add("is-error"); error.textContent = err.message || "We couldn't send the verification email. You may need to sign in again."; }
+  finally { button.disabled = false; }
+});
+$("#save-account-handle")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget, error = $("#account-settings-error"), handle = $("#account-handle").value.trim().toLowerCase();
+  if (!/^[a-z0-9_]{3,20}$/.test(handle)) { error.hidden = false; error.textContent = "Use 3–20 letters, numbers or underscores for your username."; return; }
+  button.disabled = true; error.hidden = true;
+  try { const snapshot = await getDoc(doc(db, "users", currentUser.uid)); if (!snapshot.exists()) throw new Error("Your profile could not be found."); const profile = snapshot.data(); const existingHandle = await getDoc(doc(db, "publicProfiles", handle)); if (existingHandle.exists() && existingHandle.data().uid !== currentUser.uid) throw new Error("That username is already in use. Try another one."); await saveProfileChoices({ ...profile, handle }, Boolean(profile.leaderboardOptIn)); error.hidden = false; error.classList.remove("is-error"); error.textContent = "Username saved."; }
+  catch (err) { error.hidden = false; error.classList.add("is-error"); error.textContent = err.message || "Couldn't save your username."; }
+  finally { button.disabled = false; }
+});
 
 function evaluateArithmetic(expression) {
   const tokens = expression.match(/\d+(?:\.\d+)?|[()+*/-]/g) || [];
@@ -763,6 +826,31 @@ function bindNoteActions() {
   if (boardGrid && !boardGrid.dataset.ready) {
     boardGrid.innerHTML = onboardingSubjects.map((subject) => `<label>${subject}<select name="board:${subject}"><option value="">Choose exam board</option>${boardOptions.map((board) => `<option value="${board}">${board}</option>`).join("")}</select></label>`).join("");
     boardGrid.dataset.ready = "true";
+  }
+
+  if (!form.dataset.wizardReady) {
+    const slides = document.createElement("div"); slides.className = "onboarding-slides";
+    const definitions = [
+      { title: "Your profile", selectors: [".profile-intro-grid", 'label:has([name="nickname"])', 'label:has([name="displayName"])', 'label:has([name="handle"])', 'label:has([name="bio"])', ".profile-customisation-grid"] },
+      { title: "Your subjects", selectors: [".onboarding-section"] },
+      { title: "Your study preferences", selectors: [".opt-in-field", "#link-google", "#link-google + .form-hint"] }
+    ];
+    definitions.forEach((definition, index) => {
+      const slide = document.createElement("section"); slide.className = "onboarding-step"; slide.dataset.onboardingStep = String(index); slide.hidden = index !== 0;
+      slide.innerHTML = `<div class="onboarding-step-heading"><span>STEP 0${index + 1} / 03</span><h3>${definition.title}</h3></div>`;
+      for (const selector of definition.selectors) { const node = form.querySelector(selector); if (node && !node.closest(".onboarding-slides")) slide.append(node); }
+      slides.append(slide);
+    });
+    const actions = form.querySelector(".onboarding-actions"); form.insertBefore(slides, actions);
+    const back = document.createElement("button"); back.type = "button"; back.className = "button button-light"; back.textContent = "← Back"; back.dataset.onboardingBack = ""; back.hidden = true;
+    const next = document.createElement("button"); next.type = "button"; next.className = "button button-dark"; next.textContent = "Continue →"; next.dataset.onboardingNext = "";
+    actions.insertBefore(back, actions.querySelector("#skip-onboarding")); actions.insertBefore(next, actions.querySelector(".dialog-submit"));
+    let active = 0;
+    const updateStep = () => { slides.querySelectorAll(".onboarding-step").forEach((slide, index) => { slide.hidden = index !== active; slide.classList.toggle("is-active", index === active); }); back.hidden = active === 0; next.hidden = active === 2; actions.querySelector(".dialog-submit").hidden = active !== 2; progress.style.setProperty("--step-progress", `${(active + 1) / 3 * 100}%`); };
+    back.addEventListener("click", () => { active = Math.max(0, active - 1); updateStep(); });
+    next.addEventListener("click", () => { const required = slides.querySelectorAll(`.onboarding-step[data-onboarding-step="${active}"] input[required], .onboarding-step[data-onboarding-step="${active}"] select[required]`); for (const field of required) if (!field.reportValidity()) return; active = Math.min(2, active + 1); updateStep(); });
+    const progress = document.createElement("div"); progress.className = "onboarding-progress"; progress.innerHTML = "<span></span>"; form.insertBefore(progress, slides);
+    form.dataset.wizardReady = "true"; form.__updateWizard = updateStep; form.__resetWizard = () => { active = 0; updateStep(); }; updateStep();
   }
 
   const skipButton = $("#skip-onboarding");

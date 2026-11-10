@@ -1546,3 +1546,65 @@ body { font-size: 16px; line-height: 1.55; }
 @media (prefers-reduced-motion: no-preference) { .resource-showcase-card:hover { transform: translateY(-4px); border-color: #d8d5ca; box-shadow: 0 14px 28px #30291b10; } .resource-showcase-card:hover .resource-card-arrow { transform: translateX(3px); } .resource-card-arrow { transition: transform .2s ease; } }
 @media (max-width: 850px) { .resource-showcase-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 560px) { .resource-showcase { width: calc(100% - 30px); margin: 25px auto 70px; } .resource-showcase-heading { align-items: flex-start; flex-direction: column; } .resource-showcase-grid { gap: 9px; } .resource-showcase-card { min-height: 205px; padding: 14px; } .resource-card-icon { margin-bottom: 16px; } .resource-showcase-card > strong { font-size: 17px; } .resource-showcase-foot { justify-content: flex-start; gap: 8px 14px; } }
+
+/* Full-screen, slide-based first-run onboarding */
+#profile-dialog.is-onboarding{position:fixed;inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;border:0;border-radius:0;padding:0;background:#f7f7f2;overflow:auto;box-shadow:none}
+#profile-dialog.is-onboarding::backdrop{background:#f7f7f2}
+#profile-dialog.is-onboarding .dialog-form{width:min(100%,1040px);min-height:100dvh;margin:0 auto;padding:clamp(22px,5vw,64px);display:flex;flex-direction:column;justify-content:center;gap:18px}
+#profile-dialog.is-onboarding .dialog-close{position:fixed;top:22px;right:26px;z-index:3}
+#profile-dialog.is-onboarding .dialog-mark{width:54px;height:54px}
+#profile-dialog.is-onboarding h2{font-size:clamp(30px,5vw,52px);letter-spacing:-.045em;max-width:720px}
+#profile-dialog.is-onboarding .dialog-intro{max-width:680px;font-size:16px}
+.onboarding-progress{height:5px;background:#e5e7df;border-radius:99px;overflow:hidden;margin:8px 0 4px}
+.onboarding-progress:before{content:"";display:block;width:var(--step-progress,33.333%);height:100%;background:#4c7658;border-radius:inherit;transition:width .35s ease}
+.onboarding-step{min-height:320px;animation:onboarding-enter .38s cubic-bezier(.2,.7,.2,1) both}
+.onboarding-step[hidden]{display:none}
+.onboarding-step-heading{margin-bottom:20px}
+.onboarding-step-heading span{font-size:10px;letter-spacing:.16em;font-weight:800;color:#64806a}
+.onboarding-step-heading h3{font-size:25px;margin:7px 0 0;letter-spacing:-.03em}
+#profile-dialog.is-onboarding .onboarding-section{padding:0;border:0;margin:0}
+#profile-dialog.is-onboarding .signup-board-grid{grid-template-columns:repeat(3,minmax(0,1fr));max-height:38vh;overflow:auto;padding-right:8px}
+#profile-dialog.is-onboarding .onboarding-preferences{grid-template-columns:repeat(2,minmax(0,1fr))}
+#profile-dialog.is-onboarding .onboarding-actions{position:sticky;bottom:0;padding:15px 0 0;background:linear-gradient(transparent,#f7f7f2 25%);display:flex;justify-content:flex-end;gap:10px}
+#profile-dialog.is-onboarding .onboarding-actions #skip-onboarding{margin-right:auto}
+@keyframes onboarding-enter{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:translateX(0)}}
+
+/* Account and appearance settings */
+.account-settings-dialog{width:min(560px,calc(100vw - 28px));max-height:90vh;overflow:auto}
+.account-settings-dialog .dialog-form{padding:28px;gap:15px}
+.account-settings-dialog .dialog-form>label{display:grid;gap:7px;font-size:13px;font-weight:700;color:#555f55}
+.account-settings-dialog input{width:100%;min-height:44px;padding:10px 12px;border:1px solid #dfe3da;border-radius:10px;background:#fff;color:#263128;font:inherit}
+.account-settings-dialog input[readonly]{background:#f2f3ee;color:#6f766c}
+.settings-sound-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px;border:1px solid #e8eae3;border-radius:12px;background:#f8f9f5}
+.settings-sound-row div{display:grid;gap:3px}.settings-sound-row small{color:#747b71;font-size:12px}
+
+/* Quick Fire: one-question-at-a-time revision */
+.sg-quick-fire{margin:24px 0;padding:clamp(18px,3vw,30px);border:1px solid #e4e8df;border-radius:20px;background:linear-gradient(145deg,#fff,#f6f8f3);box-shadow:0 14px 42px #293b260b;color:#303a31}
+.sg-quick-fire-header{max-width:720px}.sg-quick-fire-header h2{margin:8px 0;font-size:clamp(25px,3vw,36px);letter-spacing:-.04em}.sg-quick-fire-header p{color:#70796e;line-height:1.7}
+.sg-quick-fire-setup{display:grid;grid-template-columns:minmax(180px,1fr) minmax(140px,.65fr) auto;align-items:end;gap:12px;margin:22px 0;padding:16px;border:1px solid #e8ebe4;border-radius:14px;background:#fff}
+.sg-quick-fire-setup label{display:grid;gap:7px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#6c766a}
+.sg-quick-fire-setup select{min-height:43px;padding:9px 11px;border:1px solid #dfe4da;border-radius:9px;background:#fff;color:#303a31;font:600 13px inherit}
+.sg-quick-fire-stage{padding:20px;border:1px solid #e8ebe4;border-radius:16px;background:#fff;animation:qf-enter .35s ease both}
+.sg-quick-fire-progress{display:grid;gap:9px;font-size:12px;font-weight:800;color:#6a776a}.sg-quick-fire-progress progress{width:100%;height:7px;accent-color:#527a5a}
+.sg-quick-fire-question h3{margin:24px 0 16px;font-size:clamp(19px,2.5vw,26px);line-height:1.35}
+.sg-quick-fire-options{display:grid;gap:10px}.sg-quick-fire-option{display:flex;align-items:flex-start;gap:12px;text-align:left;padding:14px;border:1px solid #e3e8df;border-radius:11px;background:#fff;color:#354035;font:500 14px/1.55 inherit;cursor:pointer;transition:transform .18s,border-color .18s,background .18s,box-shadow .18s}.sg-quick-fire-option:hover:not(:disabled){transform:translateY(-2px);border-color:#91ad91;box-shadow:0 7px 18px #2d48200c}.sg-quick-fire-option.is-correct{background:#edf6ed;border-color:#7ba47d}.sg-quick-fire-option.is-incorrect{background:#fbefed;border-color:#d59b91}.sg-quick-fire-option:disabled{cursor:default}
+.sg-quick-fire-feedback{min-height:28px;margin:14px 0;color:#54765a;font-weight:700;font-size:13px}.sg-quick-fire-actions{display:flex;justify-content:space-between;gap:10px}.sg-quick-fire-finish{padding:28px;text-align:center;border-radius:16px;background:#fff;animation:qf-enter .4s ease both}.sg-quick-fire-finish h3{font-size:42px;margin:10px}.sg-quick-fire-finish p{color:#6d766b}
+@keyframes qf-enter{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+
+/* Proper long-form study notes and structured worksheets */
+.actual-notes-document{max-width:900px;margin-inline:auto;padding:clamp(22px,4vw,48px);line-height:1.8}
+.notes-document-header{padding-bottom:24px;border-bottom:1px solid #e8eae3}.notes-document-header h2{font-size:clamp(27px,4vw,40px);line-height:1.15;letter-spacing:-.04em;margin:12px 0}.notes-document-summary{font-size:17px;color:#647064;max-width:720px}
+.notes-section{padding:24px 0;border-bottom:1px solid #eef0ea}.notes-section h2{font-size:22px;letter-spacing:-.025em;margin:8px 0 13px}.notes-section p,.notes-section li{color:#4d584e;line-height:1.8}.notes-section li{margin:8px 0}.notes-section-kicker{font-size:10px;font-weight:850;letter-spacing:.14em;color:#66806a}.notes-section .lesson-stage-example{margin-top:14px}.notes-check{padding:13px 15px;margin:9px 0;border:1px solid #e7ebe3;border-radius:10px;background:#fafbf8}.notes-check summary{font-weight:700;cursor:pointer}.notes-document-footer{display:flex;align-items:center;justify-content:space-between;gap:15px;padding-top:22px;color:#70796e;font-size:13px}.notes-document-footer a{font-weight:800;color:#42694a}
+.course-worksheet{padding:clamp(18px,3vw,30px);border-radius:16px}.worksheet-question{padding:18px;border:1px solid #e7eae3;border-radius:13px;background:#fff;margin:14px 0;transition:border-color .2s,box-shadow .2s}.worksheet-question:focus-within{border-color:#a0b59d;box-shadow:0 8px 24px #2b43200b}.worksheet-question label{display:grid;gap:10px;font-weight:650;line-height:1.55}.worksheet-question input{min-height:44px;border:1px solid #dfe4db;border-radius:9px;padding:10px 12px;font:inherit}
+
+@media(max-width:700px){#profile-dialog.is-onboarding .dialog-form{padding:22px 18px 18px;justify-content:flex-start;padding-top:70px}#profile-dialog.is-onboarding .signup-board-grid{grid-template-columns:1fr 1fr;max-height:34vh}#profile-dialog.is-onboarding .onboarding-preferences{grid-template-columns:1fr}.sg-quick-fire-setup{grid-template-columns:1fr}.sg-quick-fire-setup .sg-primary-button{width:100%}.notes-document-footer{align-items:flex-start;flex-direction:column}}
+@media(prefers-reduced-motion:reduce){.onboarding-step,.sg-quick-fire-stage,.sg-quick-fire-finish{animation:none!important}.sg-quick-fire-option{transition:none!important}}
+
+@media(prefers-reduced-motion:no-preference){
+  .course-main>.course-page-heading,.course-main>.course-view-tabs,.course-main>.course-material-list,.workspace-inner>.workspace-head,.workspace-inner>.tabs{animation:sg-page-arrive .48s cubic-bezier(.2,.7,.2,1) both}
+  .course-note-card,.library-subject-card,.subject-course-card,.stat,.today-task-group,.panel{transition:transform .22s ease,box-shadow .22s ease,border-color .22s ease}
+  .course-note-card:hover,.library-subject-card:hover,.subject-course-card:hover{transform:translateY(-3px);box-shadow:0 16px 34px #26351d12}
+  .worksheet-question{animation:sg-page-arrive .38s ease both}
+  .worksheet-question:nth-child(2){animation-delay:35ms}.worksheet-question:nth-child(3){animation-delay:70ms}.worksheet-question:nth-child(4){animation-delay:105ms}
+  @keyframes sg-page-arrive{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+}

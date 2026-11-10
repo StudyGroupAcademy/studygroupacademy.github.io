@@ -2,6 +2,7 @@ import { getCurrentSession, getSessionUser } from "./auth-client.js";
 import { doc, getDoc, updateDoc } from "./firestore-client.js";
 import { db } from "./core.js";
 import { closeNumber, generateMathQuestion, parseLinearExpression, shuffle } from "./question-generator.js";
+import { playSound } from "./sound-effects.js";
 
 const BOARD_INFO = {
   "AQA": { code: "8300", url: "https://www.aqa.org.uk/subjects/mathematics/gcse/mathematics-8300/specification/subject-content", detail: "Three papers: one non-calculator and two calculator papers. Foundation and Higher tiers." },
@@ -73,7 +74,7 @@ function initFlashcards(root) {
   let order = cards.map((_,i)=>i), index=0, revealed=false, known=new Set(), missed=new Set();
   const card=section.querySelector("[data-sg-card]"), text=section.querySelector("[data-card-text]"), side=section.querySelector("[data-card-side]"), hint=section.querySelector("[data-card-hint]"), rating=section.querySelector("[data-card-rating]");
   const show=()=>{const c=cards[order[index]]; text.textContent=revealed?c.back:c.front; side.textContent=revealed?"ANSWER":"QUESTION"; hint.textContent=revealed?"Mark your confidence below":"Tap or press Enter to reveal"; section.querySelector("[data-card-count]").textContent=`Card ${index+1} of ${cards.length}`; rating.hidden=!revealed; section.querySelector("[data-card-progress]").textContent=`${known.size} known · ${missed.size} marked to review · ${cards.length-known.size} not yet known`;};
-  const flip=()=>{revealed=!revealed;show();};
+  const flip=()=>{revealed=!revealed;playSound("flip");show();};
   card.addEventListener("click",flip); card.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();flip();}});
   section.querySelector("[data-card-flip]").addEventListener("click",flip);
   section.querySelector("[data-card-prev]").addEventListener("click",()=>{index=(index-1+cards.length)%cards.length;revealed=false;show();});
@@ -89,12 +90,62 @@ function initGenerator(root, board) {
   let questions=[], checked=new Set();
   const generate=()=>{const count=Number(section.querySelector("[data-sg-count]").value),tier=section.querySelector("[data-sg-tier]").value;questions=shuffle(Array.from({length:count},(_,i)=>generateMathQuestion(tier,i)));checked.clear();score.hidden=true;list.innerHTML=questions.map((q,i)=>`<li class="sg-question" data-sg-q="${i}"><div class="sg-question-top"><span>${esc(q.topic)}</span><span>${q.marks} marks</span></div><p>${esc(q.prompt)}</p><label>Your answer<input type="text" maxlength="120" autocomplete="off" data-sg-answer="${i}" placeholder="Enter your answer"></label><div class="sg-question-actions"><button type="button" data-sg-check="${i}">Mark answer</button><button type="button" data-sg-show="${i}">Show worked solution</button></div><div class="sg-feedback" data-sg-feedback="${i}" aria-live="polite"></div><details class="sg-solution" data-sg-solution="${i}"><summary>Worked solution and marking</summary><ol>${q.steps.map(s=>`<li>${esc(s)}</li>`).join("")}</ol><p><strong>Answer: ${esc(q.answer)}</strong></p><p class="sg-mark-note">${q.marks} marks available. Method marks reward correct steps, not just the final answer.</p></details></li>`).join("");meta.textContent=`${count} newly generated questions · Selected board: ${board} · ${tier} tier. These are original questions on shared GCSE-style topics, not official past-paper questions.`;};
   section.querySelector("[data-sg-generate]").addEventListener("click",generate);
-  section.addEventListener("click",e=>{const check=e.target.closest("[data-sg-check]");const reveal=e.target.closest("[data-sg-show]");if(reveal){section.querySelector(`[data-sg-solution="${reveal.dataset.sgShow}"]`).open=true;return;}if(!check)return;const i=Number(check.dataset.sgCheck),q=questions[i],input=section.querySelector(`[data-sg-answer="${i}"]`),feedback=section.querySelector(`[data-sg-feedback="${i}"]`);if(!input.value.trim()){feedback.textContent="Enter an attempt first. You can include your working in the answer field.";feedback.className="sg-feedback is-error";input.focus();return;}const raw=input.value.trim();const expressionAnswer = q.linear ? parseLinearExpression(raw) : null;const numericAttempt = raw.replace(/^[a-z]+=/i, "").trim();const isCorrect=(q.accepts||[]).some(a=>normalise(raw)===normalise(a))||(typeof q.numeric==="number"&&closeNumber(numericAttempt,q.numeric))||(Boolean(q.linear&&expressionAnswer&&Math.abs(expressionAnswer.x-q.linear.x)<1e-9&&Math.abs(expressionAnswer.constant-q.linear.constant)<1e-9));if(isCorrect){checked.add(i);feedback.innerHTML=`<strong>Correct.</strong> Your answer matches the expected result. Open the worked solution to review the method.`;feedback.className="sg-feedback is-correct";}else{checked.delete(i);feedback.innerHTML=`<strong>Not quite yet.</strong> ${esc(q.hint)} Try again, or reveal the worked solution when ready.`;feedback.className="sg-feedback is-error";}const correct=section.querySelectorAll(".sg-feedback.is-correct").length;score.hidden=false;score.textContent=`${correct} of ${questions.length} currently correct. Keep trying the questions marked for review.`;});
+  section.addEventListener("click",e=>{const check=e.target.closest("[data-sg-check]");const reveal=e.target.closest("[data-sg-show]");if(reveal){section.querySelector(`[data-sg-solution="${reveal.dataset.sgShow}"]`).open=true;return;}if(!check)return;const i=Number(check.dataset.sgCheck),q=questions[i],input=section.querySelector(`[data-sg-answer="${i}"]`),feedback=section.querySelector(`[data-sg-feedback="${i}"]`);if(!input.value.trim()){feedback.textContent="Enter an attempt first. You can include your working in the answer field.";feedback.className="sg-feedback is-error";input.focus();return;}const raw=input.value.trim();const expressionAnswer = q.linear ? parseLinearExpression(raw) : null;const numericAttempt = raw.replace(/^[a-z]+=/i, "").trim();const isCorrect=(q.accepts||[]).some(a=>normalise(raw)===normalise(a))||(typeof q.numeric==="number"&&closeNumber(numericAttempt,q.numeric))||(Boolean(q.linear&&expressionAnswer&&Math.abs(expressionAnswer.x-q.linear.x)<1e-9&&Math.abs(expressionAnswer.constant-q.linear.constant)<1e-9));if(isCorrect){checked.add(i);playSound("success");feedback.innerHTML=`<strong>Correct.</strong> Your answer matches the expected result. Open the worked solution to review the method.`;feedback.className="sg-feedback is-correct";}else{checked.delete(i);feedback.innerHTML=`<strong>Not quite yet.</strong> ${esc(q.hint)} Try again, or reveal the worked solution when ready.`;feedback.className="sg-feedback is-error";}const correct=section.querySelectorAll(".sg-feedback.is-correct").length;score.hidden=false;score.textContent=`${correct} of ${questions.length} currently correct. Keep trying the questions marked for review.`;});
   generate();
+}
+
+
+function renderQuickFire(course) {
+  const topics = course.notes.map((note, index) => `<option value="${index}">${esc(note.title)}</option>`).join("");
+  return `<section class="sg-quick-fire"><header class="sg-quick-fire-header"><span class="sg-eyebrow">QUICK FIRE · ACTIVE RECALL</span><h2>Test what you know.</h2><p>Choose a topic and get a fresh, shuffled set of short questions. Questions are generated locally from the StudyGroup topic notes and practice material.</p></header><div class="sg-quick-fire-setup"><label>Topic<select data-qf-topic>${topics}</select></label><label>Questions<select data-qf-count><option value="5">5 questions</option><option value="10" selected>10 questions</option><option value="15">15 questions</option></select></label><button class="sg-primary-button" type="button" data-qf-start>Start Quick Fire →</button></div><div class="sg-quick-fire-stage" data-qf-stage hidden><div class="sg-quick-fire-progress"><span data-qf-counter>Question 1 of 10</span><progress max="10" value="1" data-qf-progress></progress></div><div class="sg-quick-fire-question" data-qf-question></div><div class="sg-quick-fire-feedback" data-qf-feedback aria-live="polite"></div><div class="sg-quick-fire-actions"><button type="button" class="sg-secondary-button" data-qf-skip>Skip</button><button type="button" class="sg-primary-button" data-qf-next disabled>Next question →</button></div></div><div class="sg-quick-fire-finish" data-qf-finish hidden><span class="sg-eyebrow">ROUND COMPLETE</span><h3 data-qf-result>0 / 10</h3><p data-qf-summary></p><button type="button" class="sg-primary-button" data-qf-again>Generate another round</button></div></section>`;
+}
+
+function initQuickFire(root, course) {
+  const section = root.querySelector(".sg-quick-fire"); if (!section) return;
+  const stage = section.querySelector("[data-qf-stage]"), finish = section.querySelector("[data-qf-finish]");
+  let questions = [], index = 0, score = 0, answered = false;
+  const buildQuestions = () => {
+    const topicIndex = Number(section.querySelector("[data-qf-topic]").value) || 0;
+    const topic = course.notes[topicIndex];
+    const count = Number(section.querySelector("[data-qf-count]").value) || 10;
+    const facts = course.notes.flatMap((note) => note.points.map((fact) => ({ topic: note.title, fact })));
+    const sourceFacts = topic.points.length ? topic.points : [topic.summary];
+    const bank = [];
+    for (let i = 0; i < count; i++) {
+      const fact = sourceFacts[i % sourceFacts.length];
+      const distractors = shuffle(facts.filter((entry) => entry.fact !== fact).map((entry) => entry.fact)).slice(0, 3);
+      const options = shuffle([fact, ...distractors]);
+      const stems = [`Which statement is correct about ${topic.title.toLowerCase()}?`, `Choose the key idea that best matches ${topic.title.toLowerCase()}.`, `Which fact belongs in your revision notes for ${topic.title.toLowerCase()}?`, `A student is revising ${topic.title.toLowerCase()}. Which statement should they remember?`];
+      bank.push({ prompt: stems[i % stems.length], answer: fact, options });
+    }
+    return shuffle(bank);
+  };
+  const show = () => {
+    const q = questions[index]; answered = false;
+    section.querySelector("[data-qf-counter]").textContent = `Question ${index + 1} of ${questions.length}`;
+    const progress = section.querySelector("[data-qf-progress]"); progress.max = questions.length; progress.value = index + 1;
+    section.querySelector("[data-qf-feedback]").textContent = "";
+    section.querySelector("[data-qf-next]").disabled = true;
+    section.querySelector("[data-qf-question]").innerHTML = `<h3>${esc(q.prompt)}</h3><div class="sg-quick-fire-options">${q.options.map((option, i) => `<button type="button" class="sg-quick-fire-option" data-qf-option="${i}">${String.fromCharCode(65 + i)} <span>${esc(option)}</span></button>`).join("")}</div>`;
+  };
+  const start = () => { questions = buildQuestions(); index = 0; score = 0; finish.hidden = true; stage.hidden = false; show(); };
+  section.querySelector("[data-qf-start]").addEventListener("click", start);
+  section.querySelector("[data-qf-again]").addEventListener("click", start);
+  section.querySelector("[data-qf-question]").addEventListener("click", (event) => {
+    const option = event.target.closest("[data-qf-option]"); if (!option || answered) return;
+    answered = true; const q = questions[index], chosen = q.options[Number(option.dataset.qfOption)];
+    const correct = chosen === q.answer; if (correct) { score++; playSound("success"); }
+    section.querySelectorAll("[data-qf-option]").forEach((button) => { button.disabled = true; const value = q.options[Number(button.dataset.qfOption)]; if (value === q.answer) button.classList.add("is-correct"); else if (button === option) button.classList.add("is-incorrect"); });
+    section.querySelector("[data-qf-feedback]").textContent = correct ? "Correct — nicely recalled." : `Not quite. The key idea is: ${q.answer}`;
+    section.querySelector("[data-qf-next]").disabled = false;
+  });
+  section.querySelector("[data-qf-skip]").addEventListener("click", () => { if (!answered) { answered = true; section.querySelector("[data-qf-feedback]").textContent = `Answer: ${questions[index].answer}`; section.querySelectorAll("[data-qf-option]").forEach((button) => { button.disabled = true; if (questions[index].options[Number(button.dataset.qfOption)] === questions[index].answer) button.classList.add("is-correct"); }); section.querySelector("[data-qf-next]").disabled = false; } });
+  section.querySelector("[data-qf-next]").addEventListener("click", () => { if (!answered) return; if (index < questions.length - 1) { index++; show(); } else { stage.hidden = true; finish.hidden = false; playSound("xp"); section.querySelector("[data-qf-result]").textContent = `${score} / ${questions.length}`; section.querySelector("[data-qf-summary]").textContent = score === questions.length ? "Perfect round. Excellent recall." : `You got ${score} right. Try another shuffled round to strengthen recall.`; } });
 }
 
 export async function mountLearningEnhancements({course, lesson, pageType, topicSlug}) {
   const main=document.querySelector(".course-main"); if(!main||!course)return;
+  if (pageType === "quick-fire") { const mount = main.querySelector("[data-quick-fire-mount]"); if (mount) { mount.innerHTML = renderQuickFire(course); initQuickFire(mount, course); } return; }
   const {user,profile,id}=await loadProfile();
   const subjectName=course.title === "Mathematics" ? "Maths" : course.title;
   let board=profile?.boards?.[subjectName] || profile?.boards?.[course.title] || "Not sure yet";

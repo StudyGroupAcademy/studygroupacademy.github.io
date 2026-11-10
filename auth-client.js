@@ -3,6 +3,7 @@ import {
   getAuth,
   GoogleAuthProvider,
   sendEmailVerification,
+  verifyBeforeUpdateEmail,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -113,6 +114,11 @@ export const authClient = {
   },
   signOut: async () => {
     await signOut(auth);
+    return { error: null };
+  },
+  requestEmailChange: async ({ email }) => {
+    if (!auth.currentUser) throw new Error("Sign in before changing your email address.");
+    await verifyBeforeUpdateEmail(auth.currentUser, email.trim());
     return { error: null };
   },
   requestPasswordReset: async ({ email }) => {

@@ -42,22 +42,10 @@ function renderNotes() {
 }
 
 function renderFullLesson(lesson, guide) {
-  if (!guide) {
-    return `<article class="course-note-card"><h2>${escapeHtml(lesson.title)}</h2><p>${escapeHtml(lesson.summary)}</p><ul>${lesson.points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}</ul><div class="course-example"><strong>Worked example</strong><p>${escapeHtml(lesson.example)}</p></div></article>`;
-  }
-  const slides = [
-    `<div class="lesson-slide lesson-slide-intro" data-lesson-slide><span class="lesson-slide-kicker">WELCOME · ${escapeHtml(guide.duration)}</span><h2>${escapeHtml(lesson.title)}</h2><p>${escapeHtml(lesson.summary)}</p><h3>By the end, you can…</h3><ul>${lesson.points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}</ul><p class="lesson-slide-tip">Move through one idea at a time. Your place is saved on this device, so you can quit and come back later.</p></div>`,
-    ...guide.stages.map((stage, index) => `<div class="lesson-slide" data-lesson-slide><span class="lesson-slide-kicker">BUILD THE IDEA · STEP ${index + 1} OF ${guide.stages.length}</span><h2>${escapeHtml(stage.title)}</h2><p>${escapeHtml(stage.text)}</p><div class="lesson-stage-example"><strong>PICTURE IT</strong><span>${escapeHtml(stage.example)}</span></div><label class="lesson-reflection">Make it yours <small>Write one short note or example in your own words.</small><textarea rows="3" maxlength="400" data-reflection="${index}" placeholder="Your thought…"></textarea></label></div>`),
-    `<div class="lesson-slide" data-lesson-slide><span class="lesson-slide-kicker">THINK IT THROUGH · WORKED MODEL</span><h2>Let's work through it together.</h2><div class="lesson-worked-prompt"><span>THE QUESTION</span><p>${escapeHtml(lesson.example)}</p></div><ol class="lesson-worked-steps">${guide.worked.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol><aside class="lesson-misconception"><span>↗</span><p><strong>Watch out for this</strong>${escapeHtml(guide.misconception)}</p></aside></div>`,
-    ...guide.questions.map((question, index) => `<div class="lesson-slide" data-lesson-slide><span class="lesson-slide-kicker">YOUR TURN · CHECK ${index + 1} OF ${guide.questions.length}</span><h2>Try it before you reveal.</h2><p class="lesson-slide-question">${escapeHtml(question.prompt)}</p><form class="lesson-self-check"><label>Your attempt<textarea rows="3" maxlength="500" required placeholder="Write your answer or working…"></textarea></label><button class="lesson-check-button" type="submit">Compare with the answer</button><div class="lesson-answer-reveal" hidden><strong>Suggested answer: ${escapeHtml(question.answer)}</strong><p>${escapeHtml(question.why)}</p><span>Take a moment to compare this with your attempt. You can continue when you're ready.</span></div></form></div>`),
-    `<div class="lesson-slide lesson-slide-finish" data-lesson-slide><span class="lesson-slide-kicker">LESSON COMPLETE</span><h2>That's a real step forward.</h2><p>Say the main idea in your own words. When you're ready, save your progress and collect your XP.</p><div class="lesson-finish-reminder"><strong>${escapeHtml(lesson.title)}</strong><span>${escapeHtml(lesson.summary)}</span></div><button class="lesson-complete-button" type="button" data-complete-lesson>Complete lesson · earn 10 XP <span>✓</span></button><p class="lesson-complete-status" data-complete-status role="status" aria-live="polite"></p></div>`
-  ];
-  return `<section class="lesson-player" data-lesson-slug="${escapeHtml(`${courseSlug}/${topicSlug}`)}" data-activity-id="${escapeHtml(`full-${courseSlug}-${topicSlug}`)}">
-    <header class="lesson-player-header"><div><span class="lesson-player-course">${escapeHtml(course.title)} · GUIDED LESSON</span><h2>${escapeHtml(lesson.title)}</h2></div><a class="lesson-quit-button" href="/content/${course.slug}/notes/">Quit lesson <span aria-hidden="true">×</span></a></header>
-    <div class="lesson-player-progress"><span data-slide-label>Getting ready…</span><progress max="${slides.length}" value="1" data-slide-progress></progress></div>
-    <div class="lesson-slide-viewport">${slides.join("")}</div>
-    <footer class="lesson-player-controls"><button class="lesson-nav-button" type="button" data-slide-prev>← Back</button><span data-slide-count></span><button class="lesson-nav-button lesson-nav-next" type="button" data-slide-next>Continue →</button></footer>
-  </section>`;
+  const sections = guide ? guide.stages.map((stage, index) => `<section class="notes-section"><span class="notes-section-kicker">IDEA ${String(index + 1).padStart(2, "0")}</span><h2>${escapeHtml(stage.title)}</h2><p>${escapeHtml(stage.text)}</p><div class="lesson-stage-example"><strong>Example</strong><span>${escapeHtml(stage.example)}</span></div></section>`).join("") : "";
+  const worked = guide ? `<section class="notes-section notes-worked-example"><span class="notes-section-kicker">WORKED EXAMPLE</span><h2>Let's work through it</h2><p>${escapeHtml(lesson.example)}</p><ol>${guide.worked.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol><aside class="lesson-misconception"><strong>Common misconception</strong><p>${escapeHtml(guide.misconception)}</p></aside></section>` : "";
+  const checks = guide ? `<section class="notes-section notes-checks"><span class="notes-section-kicker">CHECK YOUR UNDERSTANDING</span><h2>Quick self-check</h2>${guide.questions.map((question, index) => `<details class="notes-check"><summary>${index + 1}. ${escapeHtml(question.prompt)}</summary><p><strong>Suggested answer:</strong> ${escapeHtml(question.answer)}</p><p>${escapeHtml(question.why)}</p></details>`).join("")}</section>` : "";
+  return `<article class="course-note-card actual-notes-document"><header class="notes-document-header"><span class="course-note-kicker">STUDYGROUP STUDY NOTES · ${escapeHtml(guide?.duration || "SELF-PACED")}</span><h2>${escapeHtml(lesson.title)}</h2><p class="notes-document-summary">${escapeHtml(lesson.summary)}</p></header><section class="notes-section"><span class="notes-section-kicker">LEARNING OBJECTIVES</span><h2>What you should know</h2><ul>${lesson.points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}</ul></section>${sections}${worked}<section class="notes-section notes-example"><span class="notes-section-kicker">KEY EXAMPLE</span><h2>Remember this</h2><p>${escapeHtml(lesson.example)}</p></section>${checks}<footer class="notes-document-footer"><span>Read at your own pace. Return whenever you need a refresher.</span><a href="/content/${courseSlug}/worksheets/">Practise this topic →</a></footer></article>`;
 }
 
 function renderWorksheets() {
@@ -91,7 +79,7 @@ function renderSubjectLibrary() {
     <section class="library-hero"><div class="library-hero-copy"><span class="eyebrow"><span></span> YOUR LEARNING, IN ONE PLACE</span><h1>Make your next study session count.</h1><p>Explore clear notes, guided lessons and practice worksheets, organised by subject and ready whenever you are.</p><a class="library-hero-link" href="#library-subjects">Explore subjects <span>↓</span></a></div><div class="library-hero-art" aria-hidden="true"><div class="library-art-sheet"><span>SG / STUDY NOTES</span><i></i><i></i><i></i><b>01</b></div><div class="library-art-stamp">LEARN<br>STEP BY<br>STEP</div><div class="library-art-orbit"></div></div></section>
     <div class="library-overview-stats"><article><strong>${courses.length}</strong><span>Subjects</span></article><article><strong>${courses.reduce((sum, item) => sum + item.notes.length, 0)}</strong><span>Notes & lessons</span></article><article><strong>${courses.reduce((sum, item) => sum + item.worksheets.length, 0)}</strong><span>Worksheets</span></article><article><strong>Free</strong><span>Always to explore</span></article></div>
     <section class="library-subject-section" id="library-subjects"><div class="library-section-heading"><div><span class="eyebrow"><span></span> THE SUBJECT COLLECTION</span><h2>What are you studying today?</h2><p>Choose a subject to find your notes and practice.</p></div><label class="library-search"><span>⌕</span><input id="subject-search" type="search" placeholder="Search subjects…" aria-label="Search subjects"></label></div>
-      ${sections.map(([title, items, description]) => `<section class="library-category" data-library-category><div class="library-category-heading"><div><h3>${title}</h3><p>${description}</p></div><span>${items.length} ${items.length === 1 ? "subject" : "subjects"}</span></div><div class="library-subject-grid">${items.map((item) => `<article class="library-subject-card" data-subject-card data-search="${escapeHtml(`${item.title} ${item.description}`.toLowerCase())}"><a class="library-card-main" href="/content/${item.slug}/notes/"><span class="library-card-icon ${item.tone}">${escapeHtml(item.icon)}</span><span class="library-card-copy"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.description)}</small></span><span class="library-card-arrow">↗</span></a><div class="library-card-footer"><a href="/content/${item.slug}/notes/">${item.notes.length} ${item.notes.length === 1 ? "note" : "notes"}</a><a href="/content/${item.slug}/worksheets/">${item.worksheets.length} ${item.worksheets.length === 1 ? "worksheet" : "worksheets"}</a></div></article>`).join("")}</div></section>`).join("")}
+      ${sections.map(([title, items, description]) => `<section class="library-category" data-library-category><div class="library-category-heading"><div><h3>${title}</h3><p>${description}</p></div><span>${items.length} ${items.length === 1 ? "subject" : "subjects"}</span></div><div class="library-subject-grid">${items.map((item) => `<article class="library-subject-card" data-subject-card data-search="${escapeHtml(`${item.title} ${item.description}`.toLowerCase())}"><a class="library-card-main" href="/content/${item.slug}/notes/"><span class="library-card-icon ${item.tone}">${escapeHtml(item.icon)}</span><span class="library-card-copy"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.description)}</small></span><span class="library-card-arrow">↗</span></a><div class="library-card-footer"><a href="/content/${item.slug}/notes/">${item.notes.length} ${item.notes.length === 1 ? "note" : "notes"}</a><a href="/content/${item.slug}/worksheets/">${item.worksheets.length} ${item.worksheets.length === 1 ? "worksheet" : "worksheets"}</a><a href="/content/${item.slug}/quick-fire/">Quick Fire ↗</a></div></article>`).join("")}</div></section>`).join("")}
       <div class="library-no-results" id="subject-no-results" hidden>No subjects match that search. Try another word.</div>
     </section><footer class="library-footer"><span>STUDYGROUP ACADEMY</span><span>Small steps. Strong foundations.</span><a href="/dashboard/">Back to your study space ↑</a></footer>
   </section></div>`;
@@ -115,14 +103,14 @@ function renderSubjectLibrary() {
   });
 }
 
-if (window.location.pathname.replace(/\/+$/, "") === "/content" || !course || !["notes", "worksheets"].includes(pageType) || (topicSlug && (!note || pageType !== "notes"))) {
+if (window.location.pathname.replace(/\/+$/, "") === "/content" || !course || !["notes", "worksheets", "quick-fire"].includes(pageType) || (topicSlug && (!note || pageType !== "notes"))) {
   if (window.location.pathname.replace(/\/+$/, "") === "/content") renderSubjectLibrary();
   else {
     document.title = "StudyGroup subject library";
     main.innerHTML = `<header class="site-header course-header"><a class="brand" href="/"><img src="/assets/wordmark.png" alt="StudyGroup"></a><nav class="site-nav" aria-label="Main navigation"><a href="/dashboard/">My study space</a></nav></header><section class="course-not-found"><span class="eyebrow"><span></span> SUBJECT LIBRARY</span><h1>Find your next step.</h1><p>Choose a subject to open its notes and practice worksheets.</p><div class="course-not-found-links">${courses.map((item) => `<a class="course-side-link" href="/content/${item.slug}/notes/"><span class="course-side-icon ${item.tone}">${escapeHtml(item.icon)}</span>${escapeHtml(item.title)} <span>→</span></a>`).join("")}</div></section>`;
   }
 } else {
-  const label = topicSlug ? "Lesson" : pageType === "notes" ? "Notes" : "Worksheets";
+  const label = topicSlug ? "Lesson" : pageType === "notes" ? "Notes" : pageType === "quick-fire" ? "Quick Fire" : "Worksheets";
   document.title = `${topicSlug ? note.title : `${course.title} ${label}`} | StudyGroup`;
   main.innerHTML = `<div class="course-layout">${renderCourseNavigation()}
     <section class="course-main">
@@ -131,9 +119,10 @@ if (window.location.pathname.replace(/\/+$/, "") === "/content" || !course || ![
       <nav class="course-view-tabs" aria-label="${escapeHtml(course.title)} materials">
         <a href="/content/${course.slug}/notes/"${pageType === "notes" ? ' aria-current="page"' : ""}>Notes <span>${course.notes.length}</span></a>
         <a href="/content/${course.slug}/worksheets/"${pageType === "worksheets" ? ' aria-current="page"' : ""}>Worksheets <span>${course.worksheets.length}</span></a>
+        <a href="/content/${course.slug}/quick-fire/"${pageType === "quick-fire" ? ' aria-current="page"' : ""}>Quick Fire <span>↗</span></a>
       </nav>
       ${topicSlug ? `<a class="course-back-link" href="/content/${course.slug}/notes/">← All ${escapeHtml(course.title)} notes</a>` : ""}
-      ${pageType === "notes" ? renderNotes() : renderWorksheets()}
+      ${pageType === "notes" ? renderNotes() : pageType === "worksheets" ? renderWorksheets() : `<section class="quick-fire-mount" data-quick-fire-mount></section>`}
       <p class="course-disclaimer">These are original starter resources, not a complete exam-board specification. Check your course specification and your teacher's guidance.</p>
     </section>
   </div>`;
@@ -402,6 +391,6 @@ async function renderSidebarAccount() {
   }
 }
 
-if (course && ["notes", "worksheets"].includes(pageType)) {
+if (course && ["notes", "worksheets", "quick-fire"].includes(pageType)) {
   void mountLearningEnhancements({ course, lesson: note, pageType, topicSlug });
 }

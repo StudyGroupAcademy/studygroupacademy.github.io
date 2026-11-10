@@ -1,7 +1,7 @@
 const STORAGE_KEY = "studygroup:sound-effects";
-let enabled = false;
+let enabled = true;
 let audioContext;
-try { enabled = localStorage.getItem(STORAGE_KEY) === "on"; } catch {}
+try { enabled = localStorage.getItem(STORAGE_KEY) !== "off"; } catch {}
 
 const patterns = {
   click: [[520, 0.035, 0.018]],
