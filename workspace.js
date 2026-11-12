@@ -298,16 +298,36 @@ function syncActiveGroup() {
   $("#leave-group").textContent = group.ownerId === state.user.uid ? "Delete group" : "Leave group";
 }
 
+function chatDateLabel(date) {
+  if (!date) return "Earlier";
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const startMessage = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const daysAgo = Math.round((startToday - startMessage) / 86400000);
+  if (daysAgo === 0) return "Today";
+  if (daysAgo === 1) return "Yesterday";
+  return date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+}
+
 function renderMessages(items) {
   const box = $("#chat-messages");
-  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 90;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 110;
   const ordered = items.slice().reverse();
+  let previousDay = "";
   box.innerHTML = ordered.length
-    ? ordered.map((message) => `<div class="msg${message.uid === state.user.uid ? " mine" : ""}">
-        <small>${escapeHTML(message.name)}${message.date ? ` · ${formatTime(message.date)}` : ""}</small>
+    ? ordered.map((message) => {
+      const date = message.date instanceof Date ? message.date : null;
+      const dayKey = date ? `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}` : "unknown";
+      const separator = dayKey !== previousDay ? `<div class="chat-date-divider"><span>${escapeHTML(chatDateLabel(date))}</span></div>` : "";
+      previousDay = dayKey;
+      const mine = message.uid === state.user.uid;
+      return `${separator}<article class="chat-message${mine ? " mine" : ""}">
+        ${mine ? "" : `<small class="chat-message-sender">${escapeHTML(message.name || "Group member")}</small>`}
         <p>${escapeHTML(message.text)}</p>
-      </div>`).join("")
-    : '<div class="chat-hint">No messages yet. Say hello to your group.</div>';
+        <time class="chat-message-time">${date ? formatTime(date) : ""}${mine ? '<span aria-label="Sent">✓✓</span>' : ""}</time>
+      </article>`;
+    }).join("")
+    : '<div class="chat-empty-state"><span class="chat-empty-icon">✦</span><strong>Start the conversation</strong><p>Send a message to everyone in your group.</p></div>';
   if (nearBottom || ws.chatFirstRender) box.scrollTop = box.scrollHeight;
   ws.chatFirstRender = false;
 }
